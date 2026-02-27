@@ -20,6 +20,7 @@ create table if not exists public.targets (
   next_level integer not null default 1,
   status text not null default 'ACTIVE', -- ACTIVE / COMPLETED / CLOSED
   group_chat_id text,
+  pick_type text default '무료픽',        -- '무료픽' | 'VIP픽'
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint uq_targets_created_by_symbol unique (created_by, symbol)

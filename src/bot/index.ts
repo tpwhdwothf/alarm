@@ -40,11 +40,16 @@ const COMMAND_LIST_MESSAGE = [
   "",
   "━━━ 그룹에서만 사용 ━━━",
   "/setgroup : 이 채팅방을 알림 그룹으로 등록",
+  "  - /setgroup 공지방 : 공지방(일반 회원용)으로 등록",
+  "  - /setgroup VIP : VIP 전용 방으로 등록",
   "",
   "━━━ DM·그룹 모두 사용 ━━━",
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
+  "/공지방 : 공지방 입장 링크",
   "",
   "예) /등록 코길동 무료픽 현대차 005380 660000 675000",
+  "예) /setgroup 공지방  (공지방에서 실행)",
+  "예) /setgroup VIP  (VIP 전용 방에서 실행)",
 ].join("\n");
 
 function getUserId(msg: TelegramBot.Message): string | null {
@@ -611,6 +616,14 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
   bot.sendMessage(msg.chat.id, message);
 });
 
+const NOTICE_GROUP_LINK = "https://t.me/+UJDTas0rW2s0MzY1";
+
+bot.onText(/^\/공지방$/, (msg) => {
+  bot.sendMessage(msg.chat.id, `<a href="${NOTICE_GROUP_LINK}">공지방 입장하기</a>`, {
+    parse_mode: "HTML",
+  });
+});
+
 bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
   if (!supabase) {
     bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /status 를 처리할 수 없습니다.");
@@ -1093,6 +1106,9 @@ bot.on("new_chat_members", async (msg) => {
       "",
       "현재 매매 진행 중인 코길동 픽이 궁금하시면",
       "👉 /목록 을 입력해 주세요!",
+      "",
+      "코길동 픽을 더 빠르게 확인하고 싶다면",
+      '<a href="https://t.me/+UJDTas0rW2s0MzY1">공지방 입장하기</a>',
     ].join("\n");
 
     bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
