@@ -166,11 +166,14 @@ export async function processPriceEvent(
   const message = [
     "🔔 매도가 도달 알림",
     "",
-    `종목: ${displayName}`,
-    `목표가: ${currentLevel}차 (${targetPrice})`,
-    `현재가: ${currentPrice.toFixed(2)}`,
+    `${displayName}`,
+    `도달: ${targetPrice}(${currentLevel}차)`,
     "",
-    `다음 목표가: ${nextTpText}`,
+    `다음 목표가: ${
+      nextLevel <= tps.length ? `${nextTpText}(${nextLevel}차)` : nextTpText
+    }`,
+    "",
+    "🎉 수익을 축하드립니다!",
   ].join("\n");
 
   const messageId = await sendTelegramViaVercel(target.group_chat_id, message);

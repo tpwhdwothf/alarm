@@ -467,10 +467,9 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
         ? String(tpsArray[nextIdx])
         : "모든 목표가 도달";
 
-    const marketLabel = row.market === "US" ? "미장" : row.market === "KR" ? "국장" : row.market;
-    const displayName = row.name || row.symbol;
+    const header = row.name ? `${row.name}(${row.symbol})` : row.symbol;
 
-    return `- ${displayName}(${row.symbol}) ${marketLabel}\n  목표가: ${tpsText}\n  다음 목표가: ${nextTp}`;
+    return [`${header}`, `목표가: ${tpsText}`, `다음 목표가: ${nextTp}`, ""].join("\n");
   });
 
   const message = ["현재 진행 중인 길동픽 목록", "", ...lines].join("\n");

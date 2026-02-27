@@ -1,0 +1,3 @@
+cd C:\Users\tpwhd\OneDrive\Desktop\코길동
+
+ssh -i alarm-bot.key opc@161.33.212.251
