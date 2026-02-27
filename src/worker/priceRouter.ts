@@ -1,5 +1,4 @@
 import * as dotenv from "dotenv";
-import TelegramBot = require("node-telegram-bot-api");
 import { supabase } from "../lib/supabaseClient";
 
 dotenv.config();
@@ -16,15 +15,67 @@ export type TargetRow = {
   group_chat_id: string | null;
 };
 
-let sendOnlyBot: TelegramBot | null = null;
+const VERCEL_TELEGRAM_ENDPOINT = process.env.VERCEL_TELEGRAM_ENDPOINT;
+const VERCEL_TELEGRAM_SECRET = process.env.VERCEL_TELEGRAM_SECRET;
 
-function getBot(): TelegramBot {
-  if (!sendOnlyBot) {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) throw new Error("TELEGRAM_BOT_TOKEN 이 필요합니다.");
-    sendOnlyBot = new TelegramBot(token, { polling: false });
+async function sendTelegramViaVercel(
+  chatId: string,
+  text: string
+): Promise<string | null> {
+  if (!VERCEL_TELEGRAM_ENDPOINT || !VERCEL_TELEGRAM_SECRET) {
+    console.error(
+      "VERCEL_TELEGRAM_ENDPOINT / VERCEL_TELEGRAM_SECRET 환경변수가 설정되지 않아 텔레그램 알림을 건너뜁니다."
+    );
+    return null;
   }
-  return sendOnlyBot;
+
+  const payload = {
+    secret: VERCEL_TELEGRAM_SECRET,
+    chatId,
+    text,
+  };
+
+  const maxAttempts = 5;
+  let delayMs = 1000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(VERCEL_TELEGRAM_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => "");
+        console.error(
+          `[Vercel] 텔레그램 알림 실패 (status=${res.status}, attempt=${attempt}): ${bodyText}`
+        );
+      } else {
+        const json = (await res.json().catch(() => null)) as
+          | { ok?: boolean; messageId?: number | string }
+          | null;
+        if (json && json.ok && json.messageId != null) {
+          return String(json.messageId);
+        }
+        return null;
+      }
+    } catch (err) {
+      console.error(
+        `[Vercel] 텔레그램 알림 전송 중 오류 (attempt=${attempt}):`,
+        err
+      );
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs *= 2;
+    }
+  }
+
+  return null;
 }
 
 export async function processPriceEvent(
@@ -89,17 +140,18 @@ export async function processPriceEvent(
     `다음 목표가: ${nextTpText}`,
   ].join("\n");
 
+  const messageId = await sendTelegramViaVercel(target.group_chat_id, message);
+
   try {
-    const sent = await getBot().sendMessage(target.group_chat_id, message);
     await supabase.from("alert_logs").insert({
       created_by: target.created_by,
       symbol: target.symbol,
       tp_level: currentLevel,
       price: currentPrice,
-      message_id: String(sent.message_id),
+      message_id: messageId,
     });
   } catch (e) {
-    console.error("텔레그램 알림 발송 중 오류:", e);
+    console.error("알림 로그 저장 중 오류:", e);
   }
 }
 
