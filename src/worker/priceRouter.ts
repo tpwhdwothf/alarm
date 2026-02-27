@@ -13,6 +13,13 @@ export type TargetRow = {
   next_level: number;
   status: string;
   group_chat_id: string | null;
+  // 선택: '무료픽' | 'VIP픽' 저장용 (없으면 무료픽으로 간주)
+  pick_type?: string | null;
+};
+
+type AlertGroupRow = {
+  group_chat_id: string;
+  role: string | null;
 };
 
 const VERCEL_TELEGRAM_ENDPOINT = process.env.VERCEL_TELEGRAM_ENDPOINT;
@@ -82,7 +89,7 @@ export async function processPriceEvent(
   target: TargetRow,
   currentPrice: number
 ): Promise<void> {
-  if (!supabase || !target.group_chat_id) {
+  if (!supabase) {
     return;
   }
 
@@ -157,26 +164,106 @@ export async function processPriceEvent(
     return;
   }
 
-  console.log(`[알림] ${target.symbol} ${target.next_level}차 목표가 도달 (${targetPrice}) → 그룹으로 발송`);
+  console.log(
+    `[알림] ${target.symbol} ${target.next_level}차 목표가 도달 (${targetPrice}) → 그룹으로 발송`
+  );
+
   const currentLevel = target.next_level;
   const nextTpText =
     nextLevel <= tps.length ? String(tps[nextLevel - 1]) : "모든 목표가 도달";
   const displayName = target.name ? `${target.name}(${target.symbol})` : target.symbol;
+  const pickTypeLabel =
+    target.pick_type === "VIP픽" ? "코길동 VIP픽" : "코길동 무료픽";
+  const isVipPick = target.pick_type === "VIP픽";
 
-  const message = [
-    "🔔 매도가 도달 알림",
-    "",
-    `${displayName}`,
-    `도달: ${targetPrice}(${currentLevel}차)`,
-    "",
-    `다음 목표가: ${
-      nextLevel <= tps.length ? `${nextTpText}(${nextLevel}차)` : nextTpText
-    }`,
-    "",
-    "🎉 수익을 축하드립니다!",
-  ].join("\n");
+  // alert_groups 테이블에서 이 유저가 등록한 알림 그룹 목록 조회
+  let alertGroups: AlertGroupRow[] | null = null;
+  try {
+    const { data: groups, error: groupsError } = await supabase
+      .from("alert_groups")
+      .select("group_chat_id, role")
+      .eq("created_by", target.created_by);
 
-  const messageId = await sendTelegramViaVercel(target.group_chat_id, message);
+    if (!groupsError && groups && groups.length > 0) {
+      alertGroups = groups as AlertGroupRow[];
+    }
+  } catch (e) {
+    console.error("alert_groups 조회 중 오류:", e);
+  }
+
+  // 1) alert_groups 가 없으면 기존 방식(단일 group_chat_id)으로 발송
+  let lastMessageId: string | null = null;
+  if (!alertGroups || alertGroups.length === 0) {
+    if (!target.group_chat_id) {
+      return;
+    }
+
+    const nextTargetTextLegacy =
+      isVipPick
+        ? "비공개"
+        : nextLevel <= tps.length
+        ? `${nextTpText}(${nextLevel}차)`
+        : nextTpText;
+
+    const legacyMessage = [
+      "🔔 매도가 도달 알림",
+      "",
+      `${pickTypeLabel}`,
+      "",
+      `도달: ${targetPrice}(${currentLevel}차)`,
+      "",
+      `다음 목표가: ${nextTargetTextLegacy}`,
+      "",
+      "🎉 수익을 축하드립니다!",
+    ].join("\n");
+
+    lastMessageId = await sendTelegramViaVercel(target.group_chat_id, legacyMessage);
+  } else {
+    // 2) alert_groups 에 등록된 각 그룹으로 역할에 따라 분기 발송
+    for (const group of alertGroups) {
+      const role = group.role === "VIP" ? "VIP" : "NOTICE";
+      const isVipRoom = role === "VIP";
+
+      if (isVipPick && !isVipRoom) {
+        // VIP 픽 + 공지방(일반 방) → 요청된 템플릿 사용
+        const message = [
+          "🔔 VIP 매도가 도달 알림",
+          "",
+          `${pickTypeLabel}`,
+          "",
+          `${displayName}`,
+          `도달: ${targetPrice}(${currentLevel}차)`,
+          "",
+          "다음 목표가: VIP 공개",
+          "",
+          "🎉 수익을 축하드립니다!",
+        ].join("\n");
+
+        lastMessageId = await sendTelegramViaVercel(group.group_chat_id, message);
+      } else {
+        // 무료픽이거나, VIP 픽 + VIP 방 → 전체 정보 공개 버전
+        const nextTargetText =
+          nextLevel <= tps.length
+            ? `${nextTpText}(${nextLevel}차)`
+            : nextTpText;
+
+        const message = [
+          "🔔 매도가 도달 알림",
+          "",
+          `${pickTypeLabel}`,
+          "",
+          `${displayName}`,
+          `도달: ${targetPrice}(${currentLevel}차)`,
+          "",
+          `다음 목표가: ${nextTargetText}`,
+          "",
+          "🎉 수익을 축하드립니다!",
+        ].join("\n");
+
+        lastMessageId = await sendTelegramViaVercel(group.group_chat_id, message);
+      }
+    }
+  }
 
   try {
     await supabase.from("alert_logs").insert({
@@ -184,7 +271,7 @@ export async function processPriceEvent(
       symbol: target.symbol,
       tp_level: currentLevel,
       price: currentPrice,
-      message_id: messageId,
+      message_id: lastMessageId,
     });
   } catch (e) {
     console.error("알림 로그 저장 중 오류:", e);
@@ -200,7 +287,9 @@ export async function onPrice(
 
   const { data, error } = await supabase
     .from("targets")
-    .select("id, created_by, symbol, name, market, tps, next_level, status, group_chat_id")
+    .select(
+      "id, created_by, symbol, name, market, tps, next_level, status, group_chat_id, pick_type"
+    )
     .eq("symbol", symbol)
     .eq("market", market)
     .eq("status", "ACTIVE");

@@ -26,9 +26,12 @@ const COMMAND_LIST_MESSAGE = [
   "━━━ DM에서만 사용 ━━━",
   "/start 또는 /시작 : 봇 소개",
   "/명령어 : 사용 가능한 명령어 목록 (지금 이 메시지)",
-  "/add 또는 /등록 종목 tp1 tp2 ... : 목표가 등록·갱신",
+  "/add 또는 /등록 : 목표가 등록·갱신",
+  "  - /등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...",
+  "  - /등록 코길동 VIP픽 종목명 종목코드 목표가1 목표가2 ...",
   "/edit 또는 /수정 종목 tp1 tp2 ... : 목표가 수정",
   "/append 또는 /추가 종목 tpN tpN+1 ... : 목표가 뒤에 추가",
+   "/setlevel 또는 /목표 종목 레벨 : 다음 알림 단계를 수동으로 조정",
   "/status 또는 /상태 종목 : 해당 종목 상태 확인",
   "/close 또는 /종료 종목 : 매매 종료 (알림 중단)",
   "/open 또는 /재개 종목 : 다시 활성화",
@@ -41,12 +44,27 @@ const COMMAND_LIST_MESSAGE = [
   "━━━ DM·그룹 모두 사용 ━━━",
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
   "",
-  "예) /등록 AAPL 180 190 200",
+  "예) /등록 코길동 무료픽 현대차 005380 660000 675000",
 ].join("\n");
 
 function getUserId(msg: TelegramBot.Message): string | null {
   if (!msg.from) return null;
   return String(msg.from.id);
+}
+
+const ADMIN_ID_LIST =
+  (process.env.TELEGRAM_ADMIN_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean) || [];
+
+function isAdmin(userId: string | null): boolean {
+  if (!userId) return false;
+  if (ADMIN_ID_LIST.length === 0) {
+    // 관리자가 설정되어 있지 않으면 모두 허용 (잠금 방지용)
+    return true;
+  }
+  return ADMIN_ID_LIST.includes(userId);
 }
 
 function isPrivateChat(msg: TelegramBot.Message): boolean {
@@ -61,9 +79,41 @@ function detectMarket(symbol: string): "KR" | "US" {
   return /^\d+$/.test(symbol) ? "KR" : "US";
 }
 
+async function findTargetByInput(
+  userId: string,
+  input: string,
+  selectColumns: string
+) {
+  if (!supabase) {
+    return { data: null, error: new Error("Supabase not initialized") };
+  }
+
+  const trimmed = input.trim();
+  const upper = trimmed.toUpperCase();
+  const isNumeric = /^\d+$/.test(trimmed);
+
+  let query = supabase
+    .from("targets")
+    .select(selectColumns)
+    .eq("created_by", userId);
+
+  if (isNumeric) {
+    query = query.eq("symbol", upper);
+  } else {
+    query = query.or(`symbol.eq.${upper},name.eq.${trimmed}`);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  return { data, error };
+}
+
 bot.onText(/^\/start$/, (msg) => {
   if (!isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다.");
+    return;
+  }
+  const userId = getUserId(msg);
+  if (!isAdmin(userId)) {
     return;
   }
   const chatId = msg.chat.id;
@@ -75,10 +125,14 @@ bot.onText(/^\/명령어$/, (msg) => {
     bot.sendMessage(msg.chat.id, "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다.");
     return;
   }
+  const userId = getUserId(msg);
+  if (!isAdmin(userId)) {
+    return;
+  }
   bot.sendMessage(msg.chat.id, COMMAND_LIST_MESSAGE);
 });
 
-bot.onText(/^\/setgroup$/, async (msg) => {
+bot.onText(/^\/setgroup(?:\s+(.+))?$/, async (msg, match) => {
   if (!supabase) {
     bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /setgroup 을 저장할 수 없습니다.");
     return;
@@ -93,6 +147,9 @@ bot.onText(/^\/setgroup$/, async (msg) => {
   if (!userId) {
     return;
   }
+
+  const labelRaw = match && match[1] ? match[1].trim() : "";
+  const role = labelRaw === "VIP" ? "VIP" : "NOTICE";
 
   const chatId = String(msg.chat.id);
 
@@ -114,9 +171,33 @@ bot.onText(/^\/setgroup$/, async (msg) => {
     return;
   }
 
+  // alert_groups 테이블에 역할(공지방 / VIP방) 정보 저장
+  try {
+    const { error: groupError } = await supabase
+      .from("alert_groups")
+      .upsert(
+        {
+          created_by: userId,
+          group_chat_id: chatId,
+          role,
+        },
+        {
+          onConflict: "created_by,group_chat_id",
+        }
+      );
+
+    if (groupError) {
+      console.error("alert_groups upsert 중 오류:", groupError);
+    }
+  } catch (e) {
+    console.error("alert_groups upsert 예외:", e);
+  }
+
   bot.sendMessage(
     msg.chat.id,
-    "이 채팅방을 기본 알림 그룹으로 설정했어요.\n이제 DM에서 /add 명령으로 종목을 등록하면 이 방으로 알림이 전송됩니다."
+    role === "VIP"
+      ? "이 채팅방을 VIP 알림 그룹으로 설정했어요.\n이제 DM에서 /add 명령으로 종목을 등록하면 이 방에도 VIP 알림이 전송됩니다."
+      : "이 채팅방을 공지방(일반 알림 그룹)으로 설정했어요.\n이제 DM에서 /add 명령으로 종목을 등록하면 이 방으로도 알림이 전송됩니다."
   );
 });
 
@@ -135,39 +216,61 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const text = match && match[2] ? match[2] : "";
   const parts = text.split(/\s+/).filter(Boolean);
-  const rawSymbol = parts[0];
-  const maybeNameOrTp = parts[1];
-  const rest = parts.slice(2);
 
-  if (!rawSymbol || !maybeNameOrTp) {
+  // 새로운 입력 형식:
+  // /등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...
+  // /등록 코길동 VIP픽  종목명 종목코드 목표가1 목표가2 ...
+  if (parts.length < 6) {
     bot.sendMessage(
       msg.chat.id,
-      "사용법: /add 종목 tp1 tp2 ... 또는 /등록 종목 tp1 tp2 ...\n예) /add AAPL 180 190 200"
+      [
+        "사용법:",
+        "/등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...",
+        "/등록 코길동 VIP픽 종목명 종목코드 목표가1 목표가2 ...",
+        "",
+        "예) /등록 코길동 무료픽 현대차 005380 660000 675000",
+      ].join("\n")
     );
     return;
   }
 
-  let name: string | null = null;
-  let tpStrings: string[] = [];
+  const brand = parts[0];
+  const pickType = parts[1];
+  const nameInput = parts[2];
+  const rawSymbol = parts[3];
+  const tpStrings = parts.slice(4);
 
-  const firstNumber = Number(maybeNameOrTp.replace(/,/g, ""));
-  if (!Number.isNaN(firstNumber)) {
-    tpStrings = [maybeNameOrTp, ...rest];
-  } else {
-    name = maybeNameOrTp;
-    tpStrings = rest;
-  }
-
-  if (tpStrings.length === 0) {
+  if (brand !== "코길동") {
     bot.sendMessage(
       msg.chat.id,
-      "사용법: /add 종목 [종목명] tp1 tp2 ...\n예) /add AAPL 180 190 200 또는 /등록 005930 삼성전자 70000 72000"
+      "첫 번째 인자는 반드시 '코길동' 이어야 합니다.\n예) /등록 코길동 무료픽 현대차 005380 660000 675000"
     );
     return;
   }
+
+  if (pickType !== "무료픽" && pickType !== "VIP픽") {
+    bot.sendMessage(
+      msg.chat.id,
+      "두 번째 인자는 '무료픽' 또는 'VIP픽' 이어야 합니다.\n예) /등록 코길동 무료픽 현대차 005380 660000 675000"
+    );
+    return;
+  }
+
+  if (!nameInput || !rawSymbol) {
+    bot.sendMessage(
+      msg.chat.id,
+      "종목명과 종목코드를 정확히 입력해주세요.\n예) /등록 코길동 무료픽 현대차 005380 660000 675000"
+    );
+    return;
+  }
+
+  const name: string | null = nameInput;
 
   const tps = tpStrings
     .map((t) => Number(t.replace(/,/g, "")))
@@ -175,7 +278,7 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   if (tps.length === 0) {
     bot.sendMessage(
       msg.chat.id,
-      "목표가는 숫자로 입력해야 합니다. 예) /add AAPL 180 190 200 또는 /등록 AAPL 180 190 200"
+      "목표가는 숫자로 입력해야 합니다.\n예) /등록 코길동 무료픽 현대차 005380 660000 675000"
     );
     return;
   }
@@ -213,6 +316,7 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
       next_level: 1,
       status: "ACTIVE",
       group_chat_id: userSettings.default_group_chat_id,
+      pick_type: pickType,
     },
     {
       onConflict: "created_by,symbol",
@@ -251,6 +355,9 @@ bot.onText(/^\/(edit|수정) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const text = match && match[2] ? match[2] : "";
   const parts = text.split(/\s+/).filter(Boolean);
@@ -276,12 +383,11 @@ bot.onText(/^\/(edit|수정) (.+)$/, async (msg, match) => {
 
   const upperSymbol = symbol.toUpperCase();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("targets")
-    .select("id, tps, status")
-    .eq("created_by", userId)
-    .eq("symbol", upperSymbol)
-    .maybeSingle();
+  const { data: existing, error: fetchError } = await findTargetByInput(
+    userId,
+    upperSymbol,
+    "id, tps, status"
+  );
 
   if (fetchError) {
     console.error(fetchError);
@@ -339,6 +445,9 @@ bot.onText(/^\/(append|추가) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const text = match && match[2] ? match[2] : "";
   const parts = text.split(/\s+/).filter(Boolean);
@@ -364,12 +473,11 @@ bot.onText(/^\/(append|추가) (.+)$/, async (msg, match) => {
 
   const upperSymbol = symbol.toUpperCase();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("targets")
-    .select("id, tps, next_level, status")
-    .eq("created_by", userId)
-    .eq("symbol", upperSymbol)
-    .maybeSingle();
+  const { data: existing, error: fetchError } = await findTargetByInput(
+    userId,
+    upperSymbol,
+    "id, tps, next_level, status"
+  );
 
   if (fetchError) {
     console.error(fetchError);
@@ -439,11 +547,16 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
     return;
   }
 
+  const userId = getUserId(msg);
+  if (isPrivateChat(msg) && !isAdmin(userId)) {
+    return;
+  }
+
   const client = supabaseAdmin ?? supabase;
 
   const { data, error } = await client
     .from("targets")
-    .select("symbol, name, market, tps, next_level, status")
+    .select("symbol, name, market, tps, next_level, status, pick_type")
     .order("symbol");
 
   if (error) {
@@ -457,6 +570,9 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
     return;
   }
 
+  const isDm = isPrivateChat(msg);
+  const isAdminDm = isDm && isAdmin(userId);
+
   const lines = data.map((row: any) => {
     const tpsArray = Array.isArray(row.tps) ? row.tps : [];
     const tpsText = tpsArray.length ? tpsArray.join(", ") : "(없음)";
@@ -468,8 +584,27 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
         : "모든 목표가 도달";
 
     const header = row.name ? `${row.name}(${row.symbol})` : row.symbol;
+    const pickType = row.pick_type === "VIP픽" ? "코길동 VIP픽" : "코길동 무료픽";
 
-    return [`${header}`, `목표가: ${tpsText}`, `다음 목표가: ${nextTp}`, ""].join("\n");
+    if (row.pick_type === "VIP픽" && !isAdminDm) {
+      // VIP픽: 일반 유저/그룹에서는 상세 정보 비공개
+      return [
+        `${pickType}`,
+        "비공개",
+        "목표가: 비공개",
+        "다음 목표가: 비공개",
+        "",
+      ].join("\n");
+    }
+
+    // 무료픽 또는 관리자 DM에서 보는 VIP픽: 전체 정보 공개
+    return [
+      `${pickType}`,
+      `${header}`,
+      `목표가: ${tpsText}`,
+      `다음 목표가: ${nextTp}`,
+      "",
+    ].join("\n");
   });
 
   const message = ["현재 진행 중인 길동픽 목록", "", ...lines].join("\n");
@@ -491,6 +626,9 @@ bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const symbolInput = match && match[2] ? match[2].trim() : "";
   if (!symbolInput) {
@@ -503,12 +641,11 @@ bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
 
   const symbol = symbolInput.toUpperCase();
 
-  const { data, error } = await supabase
-    .from("targets")
-    .select("symbol, name, market, tps, next_level, status")
-    .eq("created_by", userId)
-    .eq("symbol", symbol)
-    .maybeSingle();
+  const { data, error } = await findTargetByInput(
+    userId,
+    symbol,
+    "symbol, name, market, tps, next_level, status"
+  );
 
   if (error) {
     console.error(error);
@@ -540,6 +677,107 @@ bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
   bot.sendMessage(msg.chat.id, message);
 });
 
+bot.onText(/^\/(setlevel|목표) (.+)$/, async (msg, match) => {
+  if (!supabase) {
+    bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /setlevel 을 처리할 수 없습니다.");
+    return;
+  }
+
+  if (!isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다.");
+    return;
+  }
+
+  const userId = getUserId(msg);
+  if (!userId) {
+    return;
+  }
+  if (!isAdmin(userId)) {
+    return;
+  }
+
+  const text = match && match[2] ? match[2].trim() : "";
+  const parts = text.split(/\s+/).filter(Boolean);
+  const symbolInput = parts[0];
+  const levelInput = parts[1];
+
+  if (!symbolInput || !levelInput) {
+    bot.sendMessage(
+      msg.chat.id,
+      [
+        "사용법: /setlevel 종목 레벨 또는 /목표 종목 레벨",
+        "예) /setlevel 005380 2",
+      ].join("\n")
+    );
+    return;
+  }
+
+  const symbol = symbolInput.toUpperCase();
+  const level = Number(levelInput);
+
+  if (!Number.isInteger(level) || level < 1) {
+    bot.sendMessage(msg.chat.id, "레벨은 1 이상의 정수로 입력해야 합니다.\n예) /setlevel 005380 2");
+    return;
+  }
+
+  const { data, error } = await findTargetByInput(
+    userId,
+    symbol,
+    "id, tps, next_level"
+  );
+
+  if (error) {
+    console.error(error);
+    bot.sendMessage(msg.chat.id, "종목 정보를 불러오는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (!data) {
+    bot.sendMessage(msg.chat.id, `해당 종목이 없습니다: ${symbol}\n먼저 /등록 으로 종목을 등록해 주세요.`);
+    return;
+  }
+
+  const tps = Array.isArray(data.tps)
+    ? data.tps.map((v: any) => Number(v)).filter((n: number) => !Number.isNaN(n))
+    : [];
+
+  if (tps.length === 0) {
+    bot.sendMessage(msg.chat.id, "해당 종목에는 아직 목표가가 없습니다. 먼저 /등록 으로 목표가를 입력해 주세요.");
+    return;
+  }
+
+  // 레벨이 목표가 개수보다 크면 "마지막 다음"으로 간주
+  const clampedLevel = level > tps.length + 1 ? tps.length + 1 : level;
+
+  const { error: updateError } = await supabase
+    .from("targets")
+    .update({
+      next_level: clampedLevel,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", data.id);
+
+  if (updateError) {
+    console.error(updateError);
+    bot.sendMessage(msg.chat.id, "레벨을 변경하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  const nextIdx = clampedLevel - 1;
+  const nextTp =
+    nextIdx >= 0 && nextIdx < tps.length
+      ? String(tps[nextIdx])
+      : "모든 목표가 도달 또는 없음";
+
+  bot.sendMessage(
+    msg.chat.id,
+    [
+      `종목 ${symbol} 의 다음 알림 단계를 ${clampedLevel}차로 변경했습니다.`,
+      `다음 목표가: ${nextTp}`,
+    ].join("\n")
+  );
+});
+
 bot.onText(/^\/(close|종료) (.+)$/, async (msg, match) => {
   if (!supabase) {
     bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /close 를 처리할 수 없습니다.");
@@ -555,6 +793,9 @@ bot.onText(/^\/(close|종료) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const symbolInput = match && match[2] ? match[2].trim() : "";
   if (!symbolInput) {
@@ -567,14 +808,39 @@ bot.onText(/^\/(close|종료) (.+)$/, async (msg, match) => {
 
   const symbol = symbolInput.toUpperCase();
 
-  const { data, error } = await supabase
+  const { data, error } = await findTargetByInput(
+    userId,
+    symbol,
+    "id, symbol, status"
+  );
+
+  if (error) {
+    console.error(error);
+    bot.sendMessage(msg.chat.id, "종목을 종료하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (!data) {
+    bot.sendMessage(
+      msg.chat.id,
+      `종목이 없거나 이미 CLOSED 상태입니다: ${symbol}\n먼저 /add 로 등록했는지 확인해주세요.`
+    );
+    return;
+  }
+
+  const { error: updateError } = await supabase
     .from("targets")
     .update({ status: "CLOSED", updated_at: new Date().toISOString() })
-    .eq("created_by", userId)
-    .eq("symbol", symbol)
+    .eq("id", data.id)
     .neq("status", "CLOSED")
     .select("symbol, status")
     .maybeSingle();
+
+  if (updateError) {
+    console.error(updateError);
+    bot.sendMessage(msg.chat.id, "종목을 종료하는 중 오류가 발생했어요.");
+    return;
+  }
 
   if (error) {
     console.error(error);
@@ -608,6 +874,9 @@ bot.onText(/^\/(open|재개) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const symbolInput = match && match[2] ? match[2].trim() : "";
   if (!symbolInput) {
@@ -620,14 +889,11 @@ bot.onText(/^\/(open|재개) (.+)$/, async (msg, match) => {
 
   const symbol = symbolInput.toUpperCase();
 
-  const { data, error } = await supabase
-    .from("targets")
-    .update({ status: "ACTIVE", updated_at: new Date().toISOString() })
-    .eq("created_by", userId)
-    .eq("symbol", symbol)
-    .eq("status", "CLOSED")
-    .select("symbol, status, next_level")
-    .maybeSingle();
+  const { data, error } = await findTargetByInput(
+    userId,
+    symbol,
+    "id, symbol, status, next_level"
+  );
 
   if (error) {
     console.error(error);
@@ -635,11 +901,30 @@ bot.onText(/^\/(open|재개) (.+)$/, async (msg, match) => {
     return;
   }
 
-  if (!data) {
+  if (!data || data.status !== "CLOSED") {
     bot.sendMessage(
       msg.chat.id,
       `CLOSED 상태인 종목이 없거나 찾을 수 없습니다: ${symbol}\n먼저 /close 로 종료한 종목인지 확인해주세요.`
     );
+    return;
+  }
+
+  const { data: reopened, error: updateError } = await supabase
+    .from("targets")
+    .update({ status: "ACTIVE", updated_at: new Date().toISOString() })
+    .eq("id", data.id)
+    .select("symbol, status, next_level")
+    .maybeSingle();
+
+  if (updateError) {
+    console.error(updateError);
+    bot.sendMessage(msg.chat.id, "종목을 다시 활성화하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (error) {
+    console.error(error);
+    bot.sendMessage(msg.chat.id, "종목을 다시 활성화하는 중 오류가 발생했어요.");
     return;
   }
 
@@ -664,6 +949,9 @@ bot.onText(/^\/(delete|삭제) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
+  if (!isAdmin(userId)) {
+    return;
+  }
 
   const symbolInput = match && match[2] ? match[2].trim() : "";
   if (!symbolInput) {
@@ -676,14 +964,29 @@ bot.onText(/^\/(delete|삭제) (.+)$/, async (msg, match) => {
 
   const symbol = symbolInput.toUpperCase();
 
-  const { error } = await supabase
-    .from("targets")
-    .delete()
-    .eq("created_by", userId)
-    .eq("symbol", symbol);
+  const { data, error } = await findTargetByInput(userId, symbol, "id, symbol");
 
   if (error) {
     console.error(error);
+    bot.sendMessage(msg.chat.id, "종목을 삭제하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (!data) {
+    bot.sendMessage(
+      msg.chat.id,
+      `해당 종목을 찾을 수 없습니다: ${symbol}\n먼저 /add 로 등록했는지 확인해주세요.`
+    );
+    return;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("targets")
+    .delete()
+    .eq("id", data.id);
+
+  if (deleteError) {
+    console.error(deleteError);
     bot.sendMessage(msg.chat.id, "종목을 삭제하는 중 오류가 발생했어요.");
     return;
   }
@@ -705,6 +1008,9 @@ bot.onText(/^\/health$/, async (msg) => {
 
   const userId = getUserId(msg);
   if (!userId) {
+    return;
+  }
+  if (!isAdmin(userId)) {
     return;
   }
 
