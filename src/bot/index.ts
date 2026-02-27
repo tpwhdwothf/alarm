@@ -439,16 +439,25 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
     return;
   }
 
+  const isGroup = isGroupChat(msg);
   const userId = getUserId(msg);
   if (!userId) {
     return;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("targets")
-    .select("symbol, name, market, tps, next_level, status")
-    .eq("created_by", userId)
+    .select("symbol, name, market, tps, next_level, status, group_chat_id")
     .order("symbol");
+
+  if (isGroup) {
+    const chatId = String(msg.chat.id);
+    query = query.eq("group_chat_id", chatId);
+  } else {
+    query = query.eq("created_by", userId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error(error);
