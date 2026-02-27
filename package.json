@@ -1,0 +1,30 @@
+{
+  "name": "alarm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/bot/index.ts",
+    "worker:mock": "ts-node-dev --respawn --transpile-only src/worker/mockPriceWorker.ts",
+    "worker:us": "ts-node-dev --respawn --transpile-only src/worker/usFinnhubWorker.ts",
+    "worker:kr": "ts-node-dev --respawn --transpile-only src/worker/krKisWorker.ts",
+    "worker:kis": "ts-node-dev --respawn --transpile-only src/worker/kisPriceWorker.ts",
+    "build": "tsc",
+    "start": "node dist/bot/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^17.3.1",
+    "node-telegram-bot-api": "^0.67.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.18.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}
