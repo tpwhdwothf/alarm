@@ -439,26 +439,10 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
     return;
   }
 
-  const isGroup = isGroupChat(msg);
-  const userId = getUserId(msg);
-  if (!userId) {
-    return;
-  }
-
-  let query = supabase
+  const { data, error } = await supabase
     .from("targets")
-    .select("symbol, name, market, tps, next_level, status, group_chat_id")
+    .select("symbol, name, market, tps, next_level, status")
     .order("symbol");
-
-  if (isGroup) {
-    // 그룹 채팅에서는 봇이 관리하는 모든 길동픽을 보여준다.
-    // (created_by, group_chat_id, status 에 상관없이 전체 공유 목록)
-  } else {
-    // DM에서는 본인이 등록한 종목만 보여준다.
-    query = query.eq("created_by", userId);
-  }
-
-  const { data, error } = await query;
 
   if (error) {
     console.error(error);
