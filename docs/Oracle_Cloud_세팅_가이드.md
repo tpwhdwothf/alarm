@@ -327,66 +327,107 @@ cd alarm
 ## 7단계: 환경 변수(.env) 설정
 
 > **이 단계가 뭐냐면**  
-> `.env` 파일에는 **봇 토큰**, **Supabase 주소·키**, **한국투자증권(KIS) 키** 같은 **비밀 값**을 넣습니다.  
-> 이 값들은 봇이 텔레그램·데이터베이스·시세 API에 접속할 때 필요합니다.  
-> PC에서 로컬로 테스트할 때 썼던 `.env` 내용을 그대로 복사해서 쓰면 됩니다.
+> `.env` 파일은 **봇이 외부 서비스에 접속할 때 필요한 비밀 정보**를 담아 두는 파일입니다.  
+> 텔레그램 봇 토큰, Supabase 주소·키, 한국투자증권(KIS) 키 같은 값을 여기에 넣습니다.  
+> PC에서 테스트할 때 `.env` 를 만들어 두었다면, 그 내용을 **그대로 복사**해서 쓰면 됩니다.
 
 ---
 
-### 7-1. .env 파일 열기
+### 7-1. 시작 전 확인
 
-**①** 프로젝트 폴더에 있는지 확인하세요. 프롬프트가 `[opc@alarm-bot alarm]$` 처럼 끝나야 합니다.  
-안 되어 있다면 아래를 실행:
+**①** 프로젝트 폴더에 있는지 확인하세요.
+
+- 프롬프트가 `[opc@alarm-bot alarm]$` 처럼 **맨 끝에 alarm**이 보여야 합니다.
+- 만약 `[opc@alarm-bot ~]$` 처럼 **alarm이 안 보이면**, 아래를 먼저 실행하세요:
 
 ```
 cd ~/alarm
 ```
 
-**②** 아래를 입력하고 **Enter**:
+---
+
+### 7-2. .env 파일 열기 (nano 편집기)
+
+**①** 아래를 입력하고 **Enter**:
 
 ```
 nano .env
 ```
 
-- `nano` 라는 **간단한 텍스트 편집기**가 열립니다.
-- 아무 것도 없는 빈 화면이거나, 기존 내용이 보일 수 있습니다.
+**②** 화면이 바뀌면 성공입니다.
+
+- **nano** 는 Linux에서 사용하는 **간단한 텍스트 편집기**입니다.
+- 화면 아래쪽에 `^G Get Help`, `^O Write Out` 같은 단축키 설명이 보일 수 있습니다.
+- `^` 는 **Ctrl 키**를 의미합니다. (예: `^O` = Ctrl+O)
+- 아무 것도 없는 빈 화면이거나, 이미 `.env` 가 있다면 기존 내용이 보일 수 있습니다.
 
 ---
 
-### 7-2. 내용 입력하기
+### 7-3. 내용 입력하기
 
-**①** 아래 내용을 **본인 값으로 수정**해서 **전체를 복사**한 뒤, nano 화면에 **붙여 넣기**:
+**①** 아래 **5줄**을 적어 두고, **각 줄의 `여기에_...` 부분만 본인 실제 값으로 바꾼 뒤** 전체를 복사하세요.
 
 ```
-TELEGRAM_BOT_TOKEN=여기에_BotFather에서_받은_봇_토큰
-SUPABASE_URL=여기에_Supabase_프로젝트_URL
+TELEGRAM_BOT_TOKEN=여기에_봇_토큰
+SUPABASE_URL=여기에_Supabase_URL
 SUPABASE_ANON_KEY=여기에_Supabase_anon_key
-KIS_APP_KEY=여기에_한국투자증권_앱키
-KIS_APP_SECRET=여기에_한국투자증권_앱시크릿
+KIS_APP_KEY=여기에_KIS_앱키
+KIS_APP_SECRET=여기에_KIS_앱시크릿
 ```
 
-**②** 각 항목을 **실제 값**으로 바꾸세요.  
-(등호 `=` 양쪽에 공백 없이, 따옴표 없이 입력)
+**②** 주의사항
+- **등호(`=`) 양쪽에 공백을 넣지 마세요.** (예: `TOKEN=abc123` O / `TOKEN = abc123` X)
+- **따옴표(`"` 또는 `'`)를 넣지 마세요.** 값만 입력합니다.
+- 각 줄은 **한 줄**로, 중간에 줄바꿈 없이 입력합니다.
 
-| 항목 | 어디서 구하는지 |
-|------|----------------|
-| TELEGRAM_BOT_TOKEN | 텔레그램에서 @BotFather 에게 `/newbot` → 생성 후 받은 토큰 |
-| SUPABASE_URL | Supabase 대시보드 → Project Settings → API → Project URL |
-| SUPABASE_ANON_KEY | Supabase 대시보드 → Project Settings → API → anon public |
-| KIS_APP_KEY | 한국투자증권 KIS Developers에서 발급한 App Key |
-| KIS_APP_SECRET | 한국투자증권 KIS Developers에서 발급한 App Secret |
+**③** 각 값은 어디서 구하나요?
+
+| 항목 | 어디서 구하는지 | 예시 형태 |
+|------|----------------|-----------|
+| TELEGRAM_BOT_TOKEN | 텔레그램에서 @BotFather 에게 `/newbot` 입력 후 봇 생성 → 받은 토큰 | `7123456789:AAH...` |
+| SUPABASE_URL | Supabase 사이트 로그인 → Project Settings → API → Project URL | `https://xxxx.supabase.co` |
+| SUPABASE_ANON_KEY | Supabase → Project Settings → API → **anon public** 키 | `eyJhbGc...` (긴 문자열) |
+| KIS_APP_KEY | 한국투자증권 KIS Developers에서 발급한 App Key | `PSxxxxxx` |
+| KIS_APP_SECRET | 한국투자증권 KIS Developers에서 발급한 App Secret | `xxxxxx` (영문·숫자) |
+
+**④** nano 화면에 **붙여 넣기**
+
+- Windows에서 SSH 접속한 경우: nano 안에서는 **마우스 오른쪽 클릭**으로 붙여 넣기가 됩니다.
+- 또는 **Shift+Insert** 키를 눌러도 됩니다.
+
+**⑤** 기존 `.env` 가 있었다면
+- 기존 내용을 **전부 지우고** 위 5줄을 붙여 넣어도 됩니다.
+- 또는 기존 내용 위/아래에 위 5줄을 추가해도 됩니다.
 
 ---
 
-### 7-3. 저장하고 나가기
+### 7-4. 저장하고 나가기 (매우 중요)
 
-nano에서 **저장**하고 **종료**하는 방법:
+nano에서 **저장**하고 **종료**하는 방법을 순서대로 따라 하세요.
 
-1. **Ctrl+O** (영어 O) 누르기 → 아래쪽에 `File Name to Write: .env` 가 보임
-2. **Enter** 누르기 → 저장됨
-3. **Ctrl+X** 누르기 → nano 종료
+**① 저장하기**
+1. **Ctrl+O** (영어 O) 키를 동시에 누릅니다.
+2. 아래쪽에 `File Name to Write: .env` 가 보이면, 그대로 **Enter** 를 누릅니다.
+3. 화면 하단에 `Wrote X lines` 같은 메시지가 보이면 **저장 완료**입니다.
 
-- 이렇게 하면 `.env` 파일이 서버에 저장되고, 다시 `[opc@alarm-bot alarm]$` 프롬프트로 돌아옵니다.
+**② 나가기**
+1. **Ctrl+X** 키를 동시에 누릅니다.
+2. `[opc@alarm-bot alarm]$` 프롬프트가 다시 보이면 nano를 **정상적으로 나온 것**입니다.
+
+> **저장을 안 하고 나가면** 입력한 내용이 모두 사라집니다. 반드시 Ctrl+O → Enter 후 Ctrl+X를 순서대로 하세요.
+
+---
+
+### 7-5. 잘 입력됐는지 확인 (선택)
+
+다시 `.env` 를 열어서 확인할 수 있습니다.
+
+```
+nano .env
+```
+
+- 방금 입력한 5줄이 보이면 정상입니다.
+- 확인 후 **Ctrl+X** 로 나오면 됩니다. (바꾼 게 없으면 저장 여부를 묻지 않고 바로 나옵니다)
 
 ---
 
