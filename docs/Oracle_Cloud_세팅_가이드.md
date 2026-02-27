@@ -653,3 +653,40 @@ pm2 restart bot worker-kis
 - **어느 단계에서** 막혔는지 알려주세요. (예: "5단계 Node.js 설치에서요", "7단계 .env 입력에서요")
 - **화면에 나온 메시지** 또는 **에러 문구**를 그대로 복사해서 보내 주세요.
 - 가능하면 **화면 캡처**도 함께 보내 주시면, 다음에 뭘 눌러야 할지·뭘 입력해야 할지 구체적으로 안내해 드릴 수 있습니다.
+
+---
+
+## 부록: 자주 쓰는 운영 명령 요약
+
+### SSH 다시 접속하기 (Windows PowerShell)
+
+1. PowerShell 열기
+2. 아래 두 줄을 순서대로 입력:
+
+```powershell
+cd C:\Users\tpwhd\OneDrive\Desktop\코길동
+ssh -i alarm-bot.key opc@공개_IP_주소
+```
+
+- 공개 IP 주소는 Oracle 콘솔의 인스턴스 상세 화면에서 `Public IP address` 값을 사용합니다.
+
+### 서버에서 상태 확인·재시작하기
+
+SSH 접속 후:
+
+```bash
+cd ~/alarm
+npx pm2 status
+```
+
+- `bot`, `worker-kis` 가 `online` 이면 정상입니다.
+
+문제가 있을 때 재시작:
+
+```bash
+cd ~/alarm
+npx pm2 restart bot worker-kis
+```
+
+서버가 재부팅된 뒤에도 crontab 과 `start-alarm.sh` 덕분에 자동으로 다시 올라오지만,  
+이상하다고 느껴지면 위 명령으로 한 번 더 상태를 확인해 주면 좋습니다.

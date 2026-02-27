@@ -33,6 +33,7 @@ const COMMAND_LIST_MESSAGE = [
   "/close 또는 /종료 종목 : 매매 종료 (알림 중단)",
   "/open 또는 /재개 종목 : 다시 활성화",
   "/delete 또는 /삭제 종목 : 목록에서 삭제",
+  "/health : 시스템 상태 간단 확인",
   "",
   "━━━ 그룹에서만 사용 ━━━",
   "/setgroup : 이 채팅방을 알림 그룹으로 등록",
@@ -696,6 +697,48 @@ bot.onText(/^\/(delete|삭제) (.+)$/, async (msg, match) => {
     msg.chat.id,
     `종목 ${symbol} 을(를) 목록에서 삭제했습니다.\n더 이상 이 종목에 대해서는 알림이 발생하지 않습니다.`
   );
+});
+
+bot.onText(/^\/health$/, async (msg) => {
+  if (!isPrivateChat(msg)) {
+    bot.sendMessage(
+      msg.chat.id,
+      "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다."
+    );
+    return;
+  }
+
+  const userId = getUserId(msg);
+  if (!userId) {
+    return;
+  }
+
+  const lines: string[] = [];
+  lines.push("✅ 봇 상태 점검 결과");
+
+  // Supabase 연결 확인
+  if (!supabase) {
+    lines.push("- Supabase: ❌ 설정되지 않음");
+  } else {
+    try {
+      const { error } = await supabase.from("targets").select("id").limit(1);
+      if (error) {
+        lines.push(`- Supabase: ⚠️ 오류 발생 (${error.message})`);
+      } else {
+        lines.push("- Supabase: ✅ 연결 정상");
+      }
+    } catch (e: any) {
+      lines.push(`- Supabase: ⚠️ 예외 발생 (${e?.message || String(e)})`);
+    }
+  }
+
+  // 간단 버전 정보
+  lines.push(`- Bot 버전: 1.0.0 (Oracle + Vercel 연동)`);
+
+  const now = new Date();
+  lines.push(`- 서버 시각: ${now.toISOString()}`);
+
+  bot.sendMessage(msg.chat.id, lines.join("\n"));
 });
 
 bot.on("new_chat_members", async (msg) => {

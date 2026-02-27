@@ -86,6 +86,39 @@ export async function processPriceEvent(
     return;
   }
 
+  // 중복 알림 방지: 같은 종목/레벨 알림이 최근 60초 이내에 이미 발송된 경우 스킵
+  try {
+    const { data: recentLogs, error: recentError } = await supabase
+      .from("alert_logs")
+      .select("created_at")
+      .eq("created_by", target.created_by)
+      .eq("symbol", target.symbol)
+      .eq("tp_level", target.next_level)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (!recentError && recentLogs && recentLogs.length > 0) {
+      const lastCreatedAt = (recentLogs[0] as { created_at?: string }).created_at;
+      if (lastCreatedAt) {
+        const last = new Date(lastCreatedAt).getTime();
+        const now = Date.now();
+        const DIFF_MS = now - last;
+        const THRESHOLD_MS = 60 * 1000; // 60초
+        if (DIFF_MS < THRESHOLD_MS) {
+          console.log(
+            `[알림] ${target.symbol} ${target.next_level}차: 최근 ${Math.round(
+              DIFF_MS / 1000
+            )}초 이내에 이미 알림이 발송되어 스킵합니다.`
+          );
+          return;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("중복 알림 여부 확인 중 오류:", e);
+    // 오류가 나더라도 알림 자체는 계속 진행
+  }
+
   const tps = target.tps;
   const nextIndex = target.next_level - 1;
 
