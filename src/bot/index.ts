@@ -1,6 +1,6 @@
 import * as dotenv from "dotenv";
 import TelegramBot = require("node-telegram-bot-api");
-import { supabase } from "../lib/supabaseClient";
+import { supabase, supabaseAdmin } from "../lib/supabaseClient";
 
 dotenv.config();
 
@@ -439,7 +439,9 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
     return;
   }
 
-  const { data, error } = await supabase
+  const client = supabaseAdmin ?? supabase;
+
+  const { data, error } = await client
     .from("targets")
     .select("symbol, name, market, tps, next_level, status")
     .order("symbol");
