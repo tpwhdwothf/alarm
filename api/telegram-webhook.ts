@@ -272,6 +272,7 @@ async function handleSetGroup(msg: TgMessage): Promise<void> {
   }
   const userId = getUserId(msg);
   if (!userId) return;
+  if (!isAdmin(userId)) return;
 
   const text = (msg.text || "").trim();
   const match = text.match(/^\/setgroup(?:\s+(.+))?$/);
@@ -885,6 +886,13 @@ async function handleHealth(msg: TgMessage): Promise<void> {
 }
 
 async function handleCheckPerms(msg: TgMessage): Promise<void> {
+  if (isGroupChat(msg)) {
+    if (!isAdmin(getUserId(msg))) return;
+  } else if (isChannelChat(msg)) {
+    const uid = getUserId(msg) ?? (await getChannelAdminUserId(msg.chat.id));
+    if (!uid || !isAdmin(uid)) return;
+  }
+
   const chatType = msg.chat.type;
   const isChannel = chatType === "channel";
   const placeName = isChannel ? "채널" : "채팅방";
