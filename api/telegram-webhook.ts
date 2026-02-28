@@ -199,6 +199,21 @@ async function sendMessageWithDmFallback(
   }
 }
 
+/** 채널 포스트에서 발신자 정보가 없을 때, 관리자 목록에서 ADMIN_ID_LIST에 있는 사용자 조회 */
+async function getChannelAdminUserId(chatId: number): Promise<string | null> {
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatAdministrators?chat_id=${chatId}`;
+  const res = await fetch(url);
+  const data = (await res.json()) as {
+    ok: boolean;
+    result?: Array<{ user: { id: number } }>;
+  };
+  if (!data.ok || !data.result?.length) return null;
+  const adminIds = data.result.map((a) => String(a.user.id));
+  if (ADMIN_ID_LIST.length === 0) return adminIds[0] ?? null;
+  return adminIds.find((id) => ADMIN_ID_LIST.includes(id)) ?? null;
+}
+
 /** API 응답을 확인해 성공/실패를 반환 (권한 확인용) */
 async function trySendMessage(
   chatId: number,
@@ -308,10 +323,15 @@ async function handleSetChannel(msg: TgMessage): Promise<void> {
     );
     return;
   }
-  const userId = getUserId(msg);
+  let userId = getUserId(msg);
   if (!userId) {
-    await reply("채널에 자신의 계정으로(익명이 아닌) 메시지를 보내야 합니다.");
-    return;
+    userId = await getChannelAdminUserId(msg.chat.id);
+    if (!userId) {
+      await reply(
+        "채널 관리자 정보를 확인할 수 없어요.\nTELEGRAM_ADMIN_IDS에 본인 ID가 포함되어 있는지 확인해주세요. (또는 채널에서 메시지에 서명을 남기도록 설정해보세요.)"
+      );
+      return;
+    }
   }
   if (!isAdmin(userId)) {
     await reply("채널 등록은 관리자만 할 수 있어요.");
