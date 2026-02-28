@@ -1,6 +1,7 @@
 import * as dotenv from "dotenv";
 import TelegramBot = require("node-telegram-bot-api");
 import { supabase, supabaseAdmin } from "../lib/supabaseClient";
+import { runHealthCheckAndAlert } from "../lib/serverHealthMonitor";
 
 dotenv.config();
 
@@ -1114,6 +1115,15 @@ bot.on("new_chat_members", async (msg) => {
     bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
   }
 });
+
+// 서버 상태 모니터: OOM 위험·메모리 부족 시 관리자 DM 경고
+const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+setInterval(() => {
+  if (ADMIN_ID_LIST.length === 0) return;
+  runHealthCheckAndAlert(ADMIN_ID_LIST, (chatId, text) =>
+    bot.sendMessage(chatId, text)
+  ).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
+}, HEALTH_CHECK_INTERVAL_MS);
 
 console.log("Telegram 봇이 시작되었습니다.");
 
