@@ -853,7 +853,7 @@ const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 setInterval(() => {
     if (ADMIN_ID_LIST.length === 0)
         return;
-    (0, serverHealthMonitor_1.runHealthCheckAndAlert)(ADMIN_ID_LIST, (chatId, text) => bot.sendMessage(chatId, text)).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
+    (0, serverHealthMonitor_1.runHealthCheckAndAlert)(ADMIN_ID_LIST, (chatId, text) => bot.sendMessage(chatId, text).then(() => { })).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
 }, HEALTH_CHECK_INTERVAL_MS);
 console.log("Telegram 봇이 시작되었습니다.");
 //# sourceMappingURL=index.js.map

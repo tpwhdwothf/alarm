@@ -1121,7 +1121,7 @@ const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 setInterval(() => {
   if (ADMIN_ID_LIST.length === 0) return;
   runHealthCheckAndAlert(ADMIN_ID_LIST, (chatId, text) =>
-    bot.sendMessage(chatId, text)
+    bot.sendMessage(chatId, text).then(() => {})
   ).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
 }, HEALTH_CHECK_INTERVAL_MS);
 
