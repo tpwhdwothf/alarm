@@ -1,7 +1,7 @@
 /**
  * 서버 상태 모니터 - OOM 위험, 메모리 부족 시 관리자에게 DM 경고
  */
-type AlertType = "OOM_RISK" | "MEMORY_HIGH" | "LOAD_HIGH";
+type AlertType = "OOM_RISK" | "MEMORY_CAUTION" | "MEMORY_HIGH" | "LOAD_HIGH";
 export interface ServerHealth {
     totalMemMB: number;
     freeMemMB: number;

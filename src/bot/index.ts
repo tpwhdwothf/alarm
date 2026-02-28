@@ -1211,14 +1211,18 @@ bot.on("new_chat_members", async (msg) => {
   }
 });
 
-// 서버 상태 모니터: OOM 위험·메모리 부족 시 관리자 DM 경고 (2분마다로 단축해 조기 경고)
+// 서버 상태 모니터: OOM 위험·메모리 부족 시 관리자 DM 경고 (봇만 돌릴 때는 .env 에 DISABLE_HEALTH_MONITOR=true 로 끄면 메모리 절약)
 const HEALTH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
-setInterval(() => {
-  if (ADMIN_ID_LIST.length === 0) return;
-  runHealthCheckAndAlert(ADMIN_ID_LIST, (chatId, text) =>
-    bot.sendMessage(chatId, text).then(() => {})
-  ).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
-}, HEALTH_CHECK_INTERVAL_MS);
+const DISABLE_HEALTH_MONITOR =
+  process.env.DISABLE_HEALTH_MONITOR === "true" || process.env.DISABLE_HEALTH_MONITOR === "1";
+if (!DISABLE_HEALTH_MONITOR) {
+  setInterval(() => {
+    if (ADMIN_ID_LIST.length === 0) return;
+    runHealthCheckAndAlert(ADMIN_ID_LIST, (chatId, text) =>
+      bot.sendMessage(chatId, text).then(() => {})
+    ).catch((e) => console.error("[serverHealthMonitor] 오류:", e));
+  }, HEALTH_CHECK_INTERVAL_MS);
+}
 
 console.log("Telegram 봇이 시작되었습니다.");
 
