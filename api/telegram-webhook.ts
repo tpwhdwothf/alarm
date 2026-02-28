@@ -39,6 +39,12 @@ const COMMAND_LIST_MESSAGE = [
   "  - /setgroup VIP : VIP방 (알림 O, 모두 공개, 새 멤버 인사 X)",
   "  - /setgroup 일반방 : 일반방 (알림 X, VIP픽 비공개, 새 멤버 인사 O, DM 불가)",
   "",
+  "━━━ 채널에서만 사용 ━━━",
+  "/setchannel : 이 채널을 알림 수신처로 등록",
+  "  - /setchannel 공지방 : 공지채널 (알림 O, VIP픽 비공개)",
+  "  - /setchannel VIP : VIP채널 (알림 O, 모두 공개)",
+  "  - /setchannel 일반방 : 일반채널 (알림 X)",
+  "",
   "━━━ DM·그룹 모두 사용 ━━━",
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
   "/공지방 : 공지방 입장 링크",
@@ -48,6 +54,7 @@ const COMMAND_LIST_MESSAGE = [
   "예) /setgroup 공지방  (공지방에서 실행)",
   "예) /setgroup VIP  (VIP 전용 방에서 실행)",
   "예) /setgroup 일반방  (일반방에서 실행)",
+  "예) /setchannel 공지방  /setchannel VIP  /setchannel 일반방  (채널에서 실행)",
 ].join("\n");
 
 const roleMessages: Record<string, string> = {
@@ -57,6 +64,15 @@ const roleMessages: Record<string, string> = {
     "이 채팅방을 일반방으로 설정했어요.\n매도가 알림은 전송되지 않고, /목록 시 VIP픽은 비공개입니다.\n/등록·/목록 등 DM 전용 명령은 관리자만 사용할 수 있어요.",
   NOTICE:
     "이 채팅방을 공지방으로 설정했어요.\n매도가 알림이 전송되며, VIP픽은 비공개입니다.\n일반회원은 DM 사용이 불가합니다.",
+};
+
+const channelRoleMessages: Record<string, string> = {
+  VIP:
+    "이 채널을 VIP채널로 설정했어요.\n매도가 알림이 전송되며, 무료픽·VIP픽 모두 공개됩니다.",
+  GENERAL:
+    "이 채널을 일반채널로 설정했어요.\n매도가 알림은 전송되지 않습니다.",
+  NOTICE:
+    "이 채널을 공지채널로 설정했어요.\n매도가 알림이 전송되며, VIP픽은 비공개입니다.",
 };
 
 const NOTICE_GROUP_LINK = "https://t.me/+UJDTas0rW2s0MzY1";
@@ -105,6 +121,10 @@ function isPrivateChat(msg: TgMessage): boolean {
 
 function isGroupChat(msg: TgMessage): boolean {
   return msg.chat.type === "group" || msg.chat.type === "supergroup";
+}
+
+function isChannelChat(msg: TgMessage): boolean {
+  return msg.chat.type === "channel";
 }
 
 function detectMarket(symbol: string): "KR" | "US" {
@@ -219,6 +239,57 @@ async function handleSetGroup(msg: TgMessage): Promise<void> {
   }
 
   await sendMessage(msg.chat.id, roleMessages[role]);
+}
+
+async function handleSetChannel(msg: TgMessage): Promise<void> {
+  if (!supabase) {
+    await sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /setchannel 을 저장할 수 없습니다.");
+    return;
+  }
+  if (!isChannelChat(msg)) {
+    await sendMessage(
+      msg.chat.id,
+      "이 명령은 채널에서만 사용할 수 있습니다.\n\n1. 봇을 채널 관리자로 추가 (Post messages 권한)\n2. 채널에 /setchannel 입력"
+    );
+    return;
+  }
+  const userId = getUserId(msg);
+  if (!userId) {
+    await sendMessage(msg.chat.id, "채널에 자신의 계정으로(익명이 아닌) 메시지를 보내야 합니다.");
+    return;
+  }
+  if (!isAdmin(userId)) {
+    await sendMessage(msg.chat.id, "채널 등록은 관리자만 할 수 있어요.");
+    return;
+  }
+
+  const text = (msg.text || "").trim();
+  const match = text.match(/^\/setchannel(?:\s+(.+))?$/);
+  const labelRaw = match && match[1] ? match[1].trim() : "";
+  let role: "NOTICE" | "VIP" | "GENERAL" = "NOTICE";
+  if (labelRaw === "VIP") role = "VIP";
+  else if (labelRaw === "일반방" || labelRaw === "일반") role = "GENERAL";
+  else if (labelRaw === "공지방" || labelRaw === "공지") role = "NOTICE";
+
+  const chatId = String(msg.chat.id);
+
+  try {
+    const { error } = await supabase
+      .from("alert_groups")
+      .upsert(
+        { created_by: userId, group_chat_id: chatId, role },
+        { onConflict: "created_by,group_chat_id" }
+      );
+    if (error) {
+      console.error("alert_groups 채널 등록 오류:", error);
+      await sendMessage(msg.chat.id, "채널 등록 중 오류가 발생했어요.");
+      return;
+    }
+    await sendMessage(msg.chat.id, channelRoleMessages[role]);
+  } catch (e) {
+    console.error("handleSetChannel 예외:", e);
+    await sendMessage(msg.chat.id, "채널 등록 중 오류가 발생했어요.");
+  }
 }
 
 async function handleRegister(msg: TgMessage): Promise<void> {
@@ -810,6 +881,10 @@ async function processUpdate(update: TgUpdate): Promise<void> {
   }
   if (/^\/setgroup(?:\s|$)/.test(text)) {
     await handleSetGroup(msg);
+    return;
+  }
+  if (/^\/setchannel(?:\s|$)/.test(text)) {
+    await handleSetChannel(msg);
     return;
   }
   if (/^\/(add|등록)\s+/.test(text)) {
