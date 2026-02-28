@@ -168,6 +168,8 @@ function delay(ms) {
 }
 async function pollPrices() {
     const { KR, US } = await getActiveTargetsByMarket();
+    if (US.length > 0)
+        console.log("[KIS] 해외 조회 대상:", US.join(", "));
     for (const symbol of KR) {
         try {
             const price = await fetchDomesticPrice(symbol);
@@ -187,6 +189,7 @@ async function pollPrices() {
         try {
             const price = await fetchOverseasPrice(symbol);
             if (price != null) {
+                console.log("[KIS] 해외 시세 조회 성공:", symbol, price);
                 (0, priceRouter_1.onPrice)(symbol, "US", price);
             }
             else {

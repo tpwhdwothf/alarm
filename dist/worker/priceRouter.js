@@ -115,9 +115,24 @@ async function processPriceEvent(target, currentPrice) {
         console.error("중복 알림 여부 확인 중 오류:", e);
         // 오류가 나더라도 알림 자체는 계속 진행
     }
-    const tps = target.tps;
+    const tpsRaw = target.tps;
+    let tps;
+    if (Array.isArray(tpsRaw)) {
+        tps = tpsRaw;
+    }
+    else if (typeof tpsRaw === "string") {
+        try {
+            tps = JSON.parse(tpsRaw);
+        }
+        catch {
+            tps = [];
+        }
+    }
+    else {
+        tps = [];
+    }
     const nextIndex = target.next_level - 1;
-    if (nextIndex < 0 || nextIndex >= tps.length) {
+    if (tps.length === 0 || nextIndex < 0 || nextIndex >= tps.length) {
         await supabaseClient_1.supabase
             .from("targets")
             .update({ status: "COMPLETED" })
@@ -260,7 +275,11 @@ async function onPrice(symbol, market, price) {
     if (error || !data || data.length === 0)
         return;
     for (const row of data) {
-        if (!Array.isArray(row.tps) || row.tps.length === 0)
+        const tpsVal = row.tps;
+        const isEmpty = !tpsVal ||
+            (Array.isArray(tpsVal) && tpsVal.length === 0) ||
+            (typeof tpsVal === "string" && (tpsVal === "[]" || tpsVal === ""));
+        if (isEmpty)
             continue;
         await processPriceEvent(row, price);
     }

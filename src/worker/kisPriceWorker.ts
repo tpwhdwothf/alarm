@@ -168,6 +168,7 @@ function delay(ms: number): Promise<void> {
 
 async function pollPrices(): Promise<void> {
   const { KR, US } = await getActiveTargetsByMarket();
+  if (US.length > 0) console.log("[KIS] 해외 조회 대상:", US.join(", "));
   for (const symbol of KR) {
     try {
       const price = await fetchDomesticPrice(symbol);
@@ -185,6 +186,7 @@ async function pollPrices(): Promise<void> {
     try {
       const price = await fetchOverseasPrice(symbol);
       if (price != null) {
+        console.log("[KIS] 해외 시세 조회 성공:", symbol, price);
         onPrice(symbol, "US", price);
       } else {
         console.warn("[KIS] 해외 시세 없음:", symbol);
