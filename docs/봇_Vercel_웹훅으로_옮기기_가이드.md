@@ -111,36 +111,94 @@ Vercel 프로젝트 → **Settings** → **Environment Variables** 에서 아래
 
 # Part 5. 텔레그램 웹훅 URL 등록
 
-텔레그램이 메시지를 **우리 Vercel 주소**로 보내도록 설정합니다.
+이 단계에서 **텔레그램이 사용자 메시지를 Vercel로 보내도록** 설정합니다.  
+설정 전에는 텔레그램이 Oracle 서버를 바라보고 있었고, 이제 Vercel 주소로 바꿔 주는 과정입니다.
 
-## 5-1. 웹훅 URL 확인
+---
 
-- Vercel 배포 주소: `https://본인프로젝트.vercel.app`  
-- 웹훅 주소: `https://본인프로젝트.vercel.app/api/telegram-webhook`
+## 5-1. 필요한 값 준비하기
 
-## 5-2. 웹훅 등록
+웹훅 등록 전에 아래 **두 가지**를 미리 적어 두세요.
 
-브라우저 주소창에 아래를 **입력**하고 Enter (본인 값으로 바꾸세요):
+| 필요한 것 | 어디서 확인? | 예시 |
+|----------|-------------|------|
+| **봇 토큰** | Vercel Environment Variables의 `TELEGRAM_BOT_TOKEN` 값 복사 | `123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw` |
+| **Vercel 프로젝트 주소** | Vercel 대시보드 → 프로젝트 → **Deployments** 탭 → 도메인 확인 | `alarm-bot.vercel.app` |
 
-```
-https://api.telegram.org/bot<여기에_봇토큰>/setWebhook?url=https://본인프로젝트.vercel.app/api/telegram-webhook
-```
+> ⚠️ 봇 토큰은 절대 다른 사람에게 공유하지 마세요.
 
-예시 (토큰이 123:ABC, 프로젝트가 cogildongalarm 이면):
+---
 
-```
-https://api.telegram.org/bot123:ABC/setWebhook?url=https://cogildongalarm.vercel.app/api/telegram-webhook
-```
+## 5-2. 웹훅 URL 만들기
 
-- 성공이면 `{"ok":true,"result":true,"description":"Webhook was set"}` 같은 JSON이 보입니다.
-
-## 5-3. 웹훅 확인 (선택)
+아래 문장을 **본인 값으로 채워서** 한 줄로 만드세요. (대괄호 안 내용을 실제 값으로 바꾸고, **대괄호·공백 없이** 붙여야 합니다.)
 
 ```
-https://api.telegram.org/bot<봇토큰>/getWebhookInfo
+https://api.telegram.org/bot[봇토큰]/setWebhook?url=https://[Vercel주소]/api/telegram-webhook
 ```
 
-- `url` 에 방금 등록한 주소가 나오면 정상입니다.
+**채우는 방법**
+
+1. `[봇토큰]` → Vercel에 저장한 `TELEGRAM_BOT_TOKEN` 값을 그대로 붙여넣기 (공백·줄바꿈 없음)
+2. `[Vercel주소]` → `본인프로젝트.vercel.app` 형태 (예: `alarm-bot.vercel.app`). `https://` 는 **url=** 뒤에 자동으로 들어가 있으니, 여기에는 프로젝트 주소만 넣음
+
+**완성 예시**
+
+- 봇 토큰: `123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw`
+- Vercel 주소: `alarm-bot.vercel.app`
+
+→ 최종 URL:
+
+```
+https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/setWebhook?url=https://alarm-bot.vercel.app/api/telegram-webhook
+```
+
+---
+
+## 5-3. 웹훅 등록 실행하기
+
+1. **크롬, 엣지 등** 웹 브라우저를 연다.
+2. **주소창**에 5-2에서 만든 URL 전체를 붙여넣는다.
+3. **Enter**를 누른다.
+4. 페이지에 아래와 비슷한 JSON이 보이면 **성공**이다.
+
+```json
+{"ok":true,"result":true,"description":"Webhook was set"}
+```
+
+| 결과 | 의미 |
+|------|------|
+| `"ok":true` | 웹훅 등록 성공 |
+| `"ok":false` | 오류 발생 → 오류 메시지 확인 후, 토큰·URL·https 여부 점검 |
+
+---
+
+## 5-4. 웹훅 등록 확인하기 (선택)
+
+제대로 등록됐는지 확인하려면, 아래 URL을 브라우저 주소창에 입력하세요.  
+`[봇토큰]` 자리에는 본인 봇 토큰을 넣습니다.
+
+```
+https://api.telegram.org/bot[봇토큰]/getWebhookInfo
+```
+
+예시:
+
+```
+https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/getWebhookInfo
+```
+
+응답 JSON 안의 `"url"` 에 방금 등록한 Vercel 주소(`https://...vercel.app/api/telegram-webhook`)가 보이면 정상입니다.
+
+---
+
+## 5-5. 자주 틀리는 부분
+
+| 상황 | 해결 방법 |
+|------|----------|
+| `"ok":false` 나온다 | URL에 공백·줄바꿈이 들어갔는지 확인. `bot` 과 토큰 사이에 공백 없어야 함. |
+| 404, 연결 오류 | Vercel 주소가 맞는지, `https://` 로 시작하는지 확인. |
+| 봇이 응답 안 한다 | Part 4 환경변수 저장 후 **Redeploy** 했는지 확인. |
 
 ---
 

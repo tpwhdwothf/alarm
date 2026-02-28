@@ -107,52 +107,49 @@ async function fetchDomesticPrice(symbol) {
     const price = Number(data.output.stck_prpr.replace(/,/g, ""));
     return Number.isNaN(price) ? null : price;
 }
-function getUsExchangeCode(symbol) {
-    return "NAS";
-}
+/** KIS 해외주식 API 거래소 코드: NAS=NASDAQ, NYS=NYSE, AMS=AMEX */
+const US_EXCHANGES = ["NAS", "NYS", "AMS"];
 async function fetchOverseasPrice(symbol) {
     const token = await getAccessToken();
     const base = getBaseUrl();
-    const url = new URL(`${base}/uapi/overseas-price/v1/quotations/inquire-asking-price`);
-    url.searchParams.set("EXCD", getUsExchangeCode(symbol));
-    url.searchParams.set("SYMB", symbol);
-    const res = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            authorization: `Bearer ${token}`,
-            appkey: KIS_APP_KEY,
-            appsecret: KIS_APP_SECRET,
-            tr_id: OVERSEAS_TR_ID,
-            custtype: "P",
-        },
-    });
-    const data = (await res.json());
-    if (!res.ok) {
-        console.warn("[KIS] 해외 시세 API HTTP", res.status, symbol, JSON.stringify(data).slice(0, 200));
-        return null;
+    for (const excd of US_EXCHANGES) {
+        const url = new URL(`${base}/uapi/overseas-price/v1/quotations/inquire-asking-price`);
+        url.searchParams.set("EXCD", excd);
+        url.searchParams.set("SYMB", symbol);
+        const res = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                authorization: `Bearer ${token}`,
+                appkey: KIS_APP_KEY,
+                appsecret: KIS_APP_SECRET,
+                tr_id: OVERSEAS_TR_ID,
+                custtype: "P",
+            },
+        });
+        const data = (await res.json());
+        if (!res.ok || data.rt_cd !== "0") {
+            await delay(RATE_LIMIT_DELAY_MS);
+            continue;
+        }
+        const out1 = data.output1;
+        if (!out1) {
+            await delay(RATE_LIMIT_DELAY_MS);
+            continue;
+        }
+        const row = Array.isArray(out1) ? out1[0] : out1;
+        const lastStr = row === null || row === void 0 ? void 0 : row.last;
+        if (lastStr == null) {
+            await delay(RATE_LIMIT_DELAY_MS);
+            continue;
+        }
+        const price = Number(String(lastStr).replace(/,/g, ""));
+        if (!Number.isNaN(price))
+            return price;
+        await delay(RATE_LIMIT_DELAY_MS);
     }
-    if (data.rt_cd !== "0") {
-        console.warn("[KIS] 해외 시세 API 응답 오류", symbol, data.msg_cd, data.msg1);
-        return null;
-    }
-    const out1 = data.output1;
-    if (!out1) {
-        console.warn("[KIS] 해외 시세 output1 없음", symbol, "keys:", data ? Object.keys(data) : []);
-        return null;
-    }
-    const row = Array.isArray(out1) ? out1[0] : out1;
-    const lastStr = row === null || row === void 0 ? void 0 : row.last;
-    if (lastStr == null) {
-        console.warn("[KIS] 해외 시세 last 없음", symbol, "output1 샘플:", JSON.stringify(row).slice(0, 150));
-        return null;
-    }
-    const price = Number(String(lastStr).replace(/,/g, ""));
-    if (Number.isNaN(price)) {
-        console.warn("[KIS] 해외 시세 last 숫자 아님", symbol, lastStr);
-        return null;
-    }
-    return price;
+    console.warn("[KIS] 해외 시세 조회 실패 (NAS/NYS/AMS 모두 시도)", symbol);
+    return null;
 }
 async function getActiveTargetsByMarket() {
     const { data, error } = await supabaseClient_1.supabase
