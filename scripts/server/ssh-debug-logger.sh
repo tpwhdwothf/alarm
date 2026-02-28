@@ -42,6 +42,11 @@ log_line() {
   fi
 
   echo "$ts | mem=${mem_pct}% used=${mem_used}MB free=${mem_free}MB | load=$load1 $load5 $load15 | ssh=$ssh_count$oom_flag" >> "$LOG_FILE"
+
+  # 메모리 많이 쓰는 상위 5개 프로세스 (스파이크 시 원인 추적용)
+  local top_mem
+  top_mem=$(ps -eo %mem,rss,comm --no-headers --sort=-%mem 2>/dev/null | head -5 | awk '{printf "%s %.0f%% %dMB", $3, $1, int($2/1024); if (NR<5) printf ", "}')
+  [ -n "$top_mem" ] && echo "  top_mem: $top_mem" >> "$LOG_FILE"
 }
 
 log_line
