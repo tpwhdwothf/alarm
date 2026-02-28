@@ -55,9 +55,10 @@ tail -50 ~/ssh-debug.log
 
 다음 명령을 입력하고 Enter를 누릅니다:
 
-```
-sudo tail -100 /var/log/auth.log
-```
+- **Oracle Linux / RHEL / CentOS:**  
+  `sudo tail -100 /var/log/secure`
+- **Ubuntu / Debian:**  
+  `sudo tail -100 /var/log/auth.log`
 
 > 비밀번호를 물어보면 서버 접속 시 사용하는 비밀번호를 입력합니다.
 
@@ -85,13 +86,29 @@ SSH가 언제, 어떤 이유로 끊겼는지를 기록한 파일의 **마지막 
 | 상황 | 가능한 원인 |
 |------|-------------|
 | `mem=90%` 이상 또는 `free`가 100MB 미만 | **메모리 부족** (서버가 꽉 차서 끊김) |
-| `mem=50%` 정도인데도 끊김 | 메모리 문제는 아닐 가능성이 큼 → ② auth.log 확인 |
+| `mem=50%` 정도인데도 끊김 | 메모리 문제는 아닐 가능성이 큼 → ② auth.log/secure 확인 |
 
 ---
 
-### ② 끊김 사유 로그 (`auth.log`) 어떻게 읽나요?
+#### 메모리 때문에 끊긴 건지 확인하는 방법
 
-`auth.log`에서 `Connection closed by`가 있는 줄을 찾습니다.
+**질문:** `tail -50 ~/ssh-debug.log` 만 보고, 메모리 부족으로 끊긴 건지 알 수 있나요?
+
+**답:** 네. 아래 순서대로 하면 됩니다.
+
+1. 끊겼던 **대략 시각**을 기억합니다. (예: 07:47경)
+2. `tail -50 ~/ssh-debug.log` 결과에서 **그 시각에 가장 가까운 줄**을 찾습니다.
+3. 그 줄의 **`mem=`** 값과 **`free=`** 값을 봅니다.
+   - **`mem=90` 이상** 이거나 **`free=100` 미만**이면 → 그때 메모리 부족으로 끊겼을 가능성이 **큽니다**.
+   - `mem`이 70% 이하고 `free`가 200MB 넘게 남아 있으면 → 메모리보다는 **유휴 끊김·네트워크** 등을 의심하는 게 좋습니다.
+
+정리하면, **끊긴 시각에 가까운 한 줄**만 잘 보면 메모리 원인 여부를 판단할 수 있습니다.
+
+---
+
+### ② 끊김 사유 로그 (`auth.log` / `secure`) 어떻게 읽나요?
+
+`/var/log/secure`(Oracle/RHEL) 또는 `/var/log/auth.log`(Ubuntu)에서 `Connection closed by`가 있는 줄을 찾습니다.
 
 **예시와 뜻**
 
@@ -122,9 +139,11 @@ SSH가 언제, 어떤 이유로 끊겼는지를 기록한 파일의 **마지막 
 
 메모리가 부족해서 서버가 프로세스를 강제 종료했는지 확인하려면, 아래 명령을 입력합니다:
 
+```bash
+sudo dmesg | grep -i "out of memory"
 ```
-dmesg | grep -i "out of memory"
-```
+
+> 권한 오류가 나면 `sudo`를 붙여 실행하세요. 재부팅 후에는 직전 부팅 로그는 `sudo journalctl -k -b -1 | grep -i "out of memory"` 로 확인할 수 있습니다.
 
 **결과가 있으면**  
 → 서버 메모리가 부족해 일부 프로세스가 종료된 상태입니다. (SSH 포함 가능)
@@ -139,8 +158,59 @@ dmesg | grep -i "out of memory"
 | 확인 내용 | 실행할 명령 |
 |-----------|-------------|
 | 메모리·부하 상태 | `tail -50 ~/ssh-debug.log` |
-| 끊김 사유 (타임아웃, 네트워크 등) | `sudo tail -100 /var/log/auth.log` |
-| 메모리 부족(OOM) 여부 | `dmesg \| grep -i "out of memory"` |
+| 끊김 사유 (타임아웃, 네트워크 등) | `sudo tail -100 /var/log/secure` (또는 auth.log) |
+| 메모리 부족(OOM) 여부 | `sudo dmesg \| grep -i "out of memory"` |
+
+---
+
+## 근본적인 대응 (끊김 예방)
+
+원인을 확인한 뒤, **다시 끊기지 않도록** 아래 설정을 적용하는 것을 권장합니다.
+
+### 1) 서버 쪽: SSH 연결 유지(keepalive) 설정
+
+유휴(아무 입력 없이 가만히 있는) 상태에서 공유기·방화벽이 연결을 끊는 것을 줄이려면, 서버의 sshd에 keepalive를 설정합니다.
+
+1. 서버에 SSH로 접속한 뒤 아래 명령으로 설정 파일을 엽니다.  
+   `sudo vi /etc/ssh/sshd_config`
+2. 다음 두 줄이 **없으면** 파일 맨 아래에 **추가**하고, 있으면 값만 아래처럼 맞춥니다.  
+   ```text
+   ClientAliveInterval 60
+   ClientAliveCountMax 3
+   ```  
+   - `ClientAliveInterval 60`: 60초마다 클라이언트에게 살아 있음 패킷 전송  
+   - `ClientAliveCountMax 3`: 3번 연속 응답 없으면 해당 연결 끊음  
+3. 저장 후 sshd를 재시작합니다.  
+   `sudo systemctl restart sshd`  
+4. 기존 SSH 세션은 그대로 두고, **새 터미널**에서 다시 접속해 동작을 확인합니다.
+
+### 2) 본인 PC(클라이언트) 쪽: keepalive 설정
+
+PC에서 서버로 보내는 keepalive를 설정하면, 중간 장비가 연결을 유지하는 데 도움이 됩니다.
+
+- **Windows (PowerShell/CMD 사용 시)**  
+  접속할 때 옵션으로:  
+  `ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -i alarm-bot.key opc@서버IP`
+- **매번 접속 시 옵션을 쓰기 싫다면**  
+  사용자 폴더 아래 `.ssh/config` 파일을 만들거나 열어서 다음을 추가합니다. (호스트 이름은 본인에 맞게 수정)  
+  ```text
+  Host alarm-bot
+      HostName 서버IP또는도메인
+      User opc
+      IdentityFile 경로/alarm-bot.key
+      ServerAliveInterval 60
+      ServerAliveCountMax 3
+  ```  
+  이후 `ssh alarm-bot` 로 접속하면 위 설정이 적용됩니다.
+
+### 3) 메모리 부족으로 끊기는 경우
+
+`ssh-debug.log`에서 끊기 직전에 **mem=90% 이상**이었다면, 서버 메모리 부족이 원인입니다.  
+
+- 봇/앱이 **메모리를 많이 쓰지 않도록** 조정하거나,  
+- 서버 **메모리 증설**,  
+- **불필요한 프로세스 정리**  
+등이 필요합니다. 봇 쪽에서는 메모리 사용률이 높아지면 관리자에게 DM으로 미리 경고가 가도록 설정되어 있습니다.
 
 ---
 
@@ -148,6 +218,6 @@ dmesg | grep -i "out of memory"
 
 위 세 가지를 확인해도 원인이 불명확하면:
 
-1. `ssh-debug.log`와 `auth.log`의 **끊긴 시각에 가까운 줄**만 따로 캡처해 두세요.
+1. `ssh-debug.log`와 `auth.log`(또는 `secure`)의 **끊긴 시각에 가까운 줄**만 따로 캡처해 두세요.
 2. `Connection closed by` 뒤에 나오는 **괄호 안 메시지**를 그대로 기록해 두세요.
 3. 기술 지원이나 상담을 받을 때 위 내용을 함께 전달하면 원인 파악에 도움이 됩니다.

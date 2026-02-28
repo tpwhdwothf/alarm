@@ -1211,8 +1211,8 @@ bot.on("new_chat_members", async (msg) => {
   }
 });
 
-// 서버 상태 모니터: OOM 위험·메모리 부족 시 관리자 DM 경고
-const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+// 서버 상태 모니터: OOM 위험·메모리 부족 시 관리자 DM 경고 (2분마다로 단축해 조기 경고)
+const HEALTH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 setInterval(() => {
   if (ADMIN_ID_LIST.length === 0) return;
   runHealthCheckAndAlert(ADMIN_ID_LIST, (chatId, text) =>

@@ -6,8 +6,11 @@ import * as os from "os";
 
 const MB = 1024 * 1024;
 
-/** 메모리 사용률 경고 임계값 (90%) */
-const MEMORY_USAGE_WARNING_THRESHOLD = 0.9;
+/** 메모리 사용률 위험 임계값 (90% - OOM 직전) */
+const MEMORY_USAGE_DANGER_THRESHOLD = 0.9;
+
+/** 메모리 사용률 주의 임계값 (85% - 조기 경고) */
+const MEMORY_USAGE_CAUTION_THRESHOLD = 0.85;
 
 /** 사용 가능 메모리 경고 임계값 (MB) */
 const MEMORY_AVAILABLE_WARNING_MB = 100;
@@ -18,7 +21,7 @@ const LOAD_AVERAGE_WARNING_MULTIPLIER = 2;
 /** 같은 타입 경고 재발송 최소 간격 (ms, 30분) */
 const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
-type AlertType = "OOM_RISK" | "MEMORY_HIGH" | "LOAD_HIGH";
+type AlertType = "OOM_RISK" | "MEMORY_CAUTION" | "MEMORY_HIGH" | "LOAD_HIGH";
 
 const lastAlertAt: Partial<Record<AlertType, number>> = {};
 
@@ -57,11 +60,19 @@ export interface HealthCheckResult {
 export function checkHealth(): HealthCheckResult {
   const h = getServerHealth();
 
-  if (h.usagePercent >= Math.round(MEMORY_USAGE_WARNING_THRESHOLD * 100)) {
+  if (h.usagePercent >= Math.round(MEMORY_USAGE_DANGER_THRESHOLD * 100)) {
     return {
       ok: false,
       alertType: "OOM_RISK",
       message: `⚠️ OOM 위험\n\n메모리 사용률 ${h.usagePercent}% (임계 90%)\n사용: ${h.usedMemMB}MB / ${h.totalMemMB}MB\n남은 여유: ${h.freeMemMB}MB\n\n서버 불안정·SSH 끊김 가능성이 있습니다.`,
+    };
+  }
+
+  if (h.usagePercent >= Math.round(MEMORY_USAGE_CAUTION_THRESHOLD * 100)) {
+    return {
+      ok: false,
+      alertType: "MEMORY_CAUTION",
+      message: `⚠️ 메모리 사용률 주의\n\n메모리 ${h.usagePercent}% 사용 중 (85% 이상)\n사용: ${h.usedMemMB}MB / ${h.totalMemMB}MB, 여유: ${h.freeMemMB}MB\n\n계속 올라가면 SSH 끊김·재부팅이 발생할 수 있습니다. /등록 대량 입력을 줄이거나 프로세스를 확인해 보세요.`,
     };
   }
 
