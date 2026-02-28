@@ -25,11 +25,12 @@ const COMMAND_LIST_MESSAGE = [
   "📌 사용 가능한 명령어",
   "",
   "━━━ DM에서만 사용 ━━━",
+  "(관리자 또는 일반방 소속 회원만 DM 사용 가능)",
   "/start 또는 /시작 : 봇 소개",
   "/명령어 : 사용 가능한 명령어 목록 (지금 이 메시지)",
   "/add 또는 /등록 : 목표가 등록·갱신",
-  "  - /등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...",
-  "  - /등록 코길동 VIP픽 종목명 종목코드 목표가1 목표가2 ...",
+  "  - /등록 코길동 무료픽 종목명 종목코드 [매수가] 목표가1 목표가2 ...",
+  "  - 매수가: 110000~220000 (선택, 공백 없이 입력해도 표시 시 공백 처리)",
   "/edit 또는 /수정 종목 tp1 tp2 ... : 목표가 수정",
   "/append 또는 /추가 종목 tpN tpN+1 ... : 목표가 뒤에 추가",
    "/setlevel 또는 /목표 종목 레벨 : 다음 알림 단계를 수동으로 조정",
@@ -41,16 +42,19 @@ const COMMAND_LIST_MESSAGE = [
   "",
   "━━━ 그룹에서만 사용 ━━━",
   "/setgroup : 이 채팅방을 알림 그룹으로 등록",
-  "  - /setgroup 공지방 : 공지방(일반 회원용)으로 등록",
-  "  - /setgroup VIP : VIP 전용 방으로 등록",
+  "  - /setgroup 공지방 : 공지방 (알림 O, VIP픽 비공개, 새 멤버 인사 X)",
+  "  - /setgroup VIP : VIP방 (알림 O, 모두 공개, 새 멤버 인사 X)",
+  "  - /setgroup 일반방 : 일반방 (알림 X, VIP픽 비공개, 새 멤버 인사 O)",
   "",
   "━━━ DM·그룹 모두 사용 ━━━",
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
   "/공지방 : 공지방 입장 링크",
   "",
-  "예) /등록 코길동 무료픽 현대차 005380 660000 675000",
+  "예) /등록 코길동 무료픽 LG에너지솔루션 373220 110000~220000 435000 454000 490000 525000 600000 630000",
+  "예) /등록 코길동 무료픽 현대차 005380 660000 675000  (매수가 생략 가능)",
   "예) /setgroup 공지방  (공지방에서 실행)",
   "예) /setgroup VIP  (VIP 전용 방에서 실행)",
+  "예) /setgroup 일반방  (일반방에서 실행)",
 ].join("\n");
 
 function getUserId(msg: TelegramBot.Message): string | null {
@@ -67,10 +71,23 @@ const ADMIN_ID_LIST =
 function isAdmin(userId: string | null): boolean {
   if (!userId) return false;
   if (ADMIN_ID_LIST.length === 0) {
-    // 관리자가 설정되어 있지 않으면 모두 허용 (잠금 방지용)
     return true;
   }
   return ADMIN_ID_LIST.includes(userId);
+}
+
+async function canUseDm(userId: string | null): Promise<boolean> {
+  if (!userId) return false;
+  if (isAdmin(userId)) return true;
+  if (!supabase) return false;
+  const { data } = await supabase
+    .from("alert_groups")
+    .select("id")
+    .eq("created_by", userId)
+    .eq("role", "GENERAL")
+    .limit(1)
+    .maybeSingle();
+  return !!data;
 }
 
 function isPrivateChat(msg: TelegramBot.Message): boolean {
@@ -113,26 +130,25 @@ async function findTargetByInput(
   return { data, error };
 }
 
-bot.onText(/^\/start$/, (msg) => {
+bot.onText(/^\/start$/, async (msg) => {
   if (!isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다.");
     return;
   }
   const userId = getUserId(msg);
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, START_MESSAGE);
+  bot.sendMessage(msg.chat.id, START_MESSAGE);
 });
 
-bot.onText(/^\/명령어$/, (msg) => {
+bot.onText(/^\/명령어$/, async (msg) => {
   if (!isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "이 명령은 봇과의 1:1 대화(DM)에서만 사용할 수 있습니다.");
     return;
   }
   const userId = getUserId(msg);
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
   bot.sendMessage(msg.chat.id, COMMAND_LIST_MESSAGE);
@@ -155,7 +171,9 @@ bot.onText(/^\/setgroup(?:\s+(.+))?$/, async (msg, match) => {
   }
 
   const labelRaw = match && match[1] ? match[1].trim() : "";
-  const role = labelRaw === "VIP" ? "VIP" : "NOTICE";
+  let role: "NOTICE" | "VIP" | "GENERAL" = "NOTICE";
+  if (labelRaw === "VIP") role = "VIP";
+  else if (labelRaw === "일반방") role = "GENERAL";
 
   const chatId = String(msg.chat.id);
 
@@ -199,12 +217,14 @@ bot.onText(/^\/setgroup(?:\s+(.+))?$/, async (msg, match) => {
     console.error("alert_groups upsert 예외:", e);
   }
 
-  bot.sendMessage(
-    msg.chat.id,
-    role === "VIP"
-      ? "이 채팅방을 VIP 알림 그룹으로 설정했어요.\n이제 DM에서 /add 명령으로 종목을 등록하면 이 방에도 VIP 알림이 전송됩니다."
-      : "이 채팅방을 공지방(일반 알림 그룹)으로 설정했어요.\n이제 DM에서 /add 명령으로 종목을 등록하면 이 방으로도 알림이 전송됩니다."
-  );
+  const roleMessages: Record<string, string> = {
+    VIP: "이 채팅방을 VIP방으로 설정했어요.\n매도가 알림이 전송되며, 무료픽·VIP픽 모두 공개됩니다.\n일반회원은 DM 사용이 불가합니다.",
+    GENERAL:
+      "이 채팅방을 일반방으로 설정했어요.\n매도가 알림은 전송되지 않고, /목록 시 VIP픽은 비공개입니다.\n일반회원도 DM 사용이 가능합니다.",
+    NOTICE:
+      "이 채팅방을 공지방으로 설정했어요.\n매도가 알림이 전송되며, VIP픽은 비공개입니다.\n일반회원은 DM 사용이 불가합니다.",
+  };
+  bot.sendMessage(msg.chat.id, roleMessages[role]);
 });
 
 bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
@@ -222,25 +242,26 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
   const text = match && match[2] ? match[2] : "";
   const parts = text.split(/\s+/).filter(Boolean);
 
-  // 새로운 입력 형식:
-  // /등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...
-  // /등록 코길동 VIP픽  종목명 종목코드 목표가1 목표가2 ...
-  if (parts.length < 6) {
+  // 입력 형식:
+  // /등록 코길동 무료픽 종목명 종목코드 [매수가] 목표가1 목표가2 ...
+  // 매수가: 110000~220000 (선택, 공백 없이 입력 가능)
+  if (parts.length < 5) {
     bot.sendMessage(
       msg.chat.id,
       [
         "사용법:",
-        "/등록 코길동 무료픽 종목명 종목코드 목표가1 목표가2 ...",
-        "/등록 코길동 VIP픽 종목명 종목코드 목표가1 목표가2 ...",
+        "/등록 코길동 무료픽 종목명 종목코드 [매수가] 목표가1 목표가2 ...",
+        "매수가: 110000~220000 (선택)",
         "",
         "예) /등록 코길동 무료픽 현대차 005380 660000 675000",
+        "예) /등록 코길동 무료픽 LG에너지솔루션 373220 110000~220000 435000 454000",
       ].join("\n")
     );
     return;
@@ -250,7 +271,50 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   const pickType = parts[1];
   const nameInput = parts[2];
   const rawSymbol = parts[3];
-  const tpStrings = parts.slice(4);
+
+  // parts[4]가 매수가(110000~220000 또는 110000 ~ 220000)인지 확인
+  let buyPriceRange: string | null = null;
+  let tpStrings: string[];
+  const part4 = parts[4];
+  const part5 = parts[5];
+  const part6 = parts[6];
+
+  const parseBuyPriceRange = (lowStr: string, highStr: string): string | null => {
+    const low = Number(lowStr.replace(/,/g, ""));
+    const high = Number(highStr.replace(/,/g, ""));
+    if (Number.isNaN(low) || Number.isNaN(high) || low > high) return null;
+    return `${lowStr} ~ ${highStr}`;
+  };
+
+  if (part4 && part4.includes("~")) {
+    const segments = part4.split("~").map((s) => s.trim());
+    if (segments.length === 2) {
+      buyPriceRange = parseBuyPriceRange(segments[0], segments[1]);
+      tpStrings = parts.slice(5);
+    }
+  } else if (part4 && part5 === "~" && part6) {
+    buyPriceRange = parseBuyPriceRange(part4, part6);
+    tpStrings = parts.slice(7);
+  }
+
+  if ((part4?.includes("~") || part5 === "~") && !buyPriceRange) {
+    bot.sendMessage(
+      msg.chat.id,
+      "매수가 범위 형식이 올바르지 않습니다.\n예) 110000~220000 또는 110000 ~ 220000"
+    );
+    return;
+  }
+  if (buyPriceRange === undefined) {
+    tpStrings = parts.slice(4);
+  }
+
+  if (tpStrings.length === 0) {
+    bot.sendMessage(
+      msg.chat.id,
+      "목표가는 1개 이상 입력해야 합니다.\n예) /등록 코길동 무료픽 현대차 005380 660000 675000"
+    );
+    return;
+  }
 
   if (brand !== "코길동") {
     bot.sendMessage(
@@ -323,6 +387,7 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
       status: "ACTIVE",
       group_chat_id: userSettings.default_group_chat_id,
       pick_type: pickType,
+      buy_price_range: buyPriceRange ?? null,
     },
     {
       onConflict: "created_by,symbol",
@@ -340,10 +405,12 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   }
 
   const tpText = tps.join(", ");
-  bot.sendMessage(
-    msg.chat.id,
-    `종목 ${upperSymbol}의 목표가를 등록/갱신했습니다.\n목표가: ${tpText}\n시장: ${market}`
-  );
+  let resultMsg = `종목 ${upperSymbol}의 목표가를 등록/갱신했습니다.\n`;
+  if (buyPriceRange) {
+    resultMsg += `매수가: ${buyPriceRange}\n`;
+  }
+  resultMsg += `목표가: ${tpText}\n시장: ${market}`;
+  bot.sendMessage(msg.chat.id, resultMsg);
 });
 
 bot.onText(/^\/(edit|수정) (.+)$/, async (msg, match) => {
@@ -361,7 +428,7 @@ bot.onText(/^\/(edit|수정) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -451,7 +518,7 @@ bot.onText(/^\/(append|추가) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -554,15 +621,28 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
   }
 
   const userId = getUserId(msg);
-  if (isPrivateChat(msg) && !isAdmin(userId)) {
+  if (isPrivateChat(msg) && !(await canUseDm(userId))) {
     return;
   }
 
   const client = supabaseAdmin ?? supabase;
 
+  let isVipHiddenRoom = false;
+  if (isGroupChat(msg)) {
+    const { data: groupRow } = await client
+      .from("alert_groups")
+      .select("role")
+      .eq("group_chat_id", String(msg.chat.id))
+      .limit(1)
+      .maybeSingle();
+    const role = groupRow?.role;
+    isVipHiddenRoom = role === "NOTICE" || role === "GENERAL";
+  }
+
   const { data, error } = await client
     .from("targets")
-    .select("symbol, name, market, tps, next_level, status, pick_type")
+    .select("symbol, name, market, tps, next_level, status, pick_type, buy_price_range")
+    .eq("status", "ACTIVE")
     .order("symbol");
 
   if (error) {
@@ -589,32 +669,37 @@ bot.onText(/^\/(list|목록)$/, async (msg) => {
         ? String(tpsArray[nextIdx])
         : "모든 목표가 도달";
 
-    const header = row.name ? `${row.name}(${row.symbol})` : row.symbol;
     const pickType = row.pick_type === "VIP픽" ? "코길동 VIP픽" : "코길동 무료픽";
 
-    if (row.pick_type === "VIP픽" && !isAdminDm) {
-      // VIP픽: 일반 유저/그룹에서는 상세 정보 비공개
+    if (row.pick_type === "VIP픽" && isVipHiddenRoom && !isAdminDm) {
       return [
-        `${pickType}`,
-        "비공개",
+        `<b>${pickType}</b>`,
+        "종목: 비공개",
+        "매수가: 비공개",
         "목표가: 비공개",
         "다음 목표가: 비공개",
         "",
       ].join("\n");
     }
 
-    // 무료픽 또는 관리자 DM에서 보는 VIP픽: 전체 정보 공개
-    return [
-      `${pickType}`,
-      `${header}`,
+    const header = row.name ? `${row.name}(${row.symbol})` : `${row.symbol}`;
+    const buyPriceLine = row.buy_price_range
+      ? `매수가: ${row.buy_price_range}`
+      : null;
+
+    const parts = [
+      `<b>${pickType}</b>`,
+      `종목: ${header}`,
+      ...(buyPriceLine ? [buyPriceLine] : []),
       `목표가: ${tpsText}`,
       `다음 목표가: ${nextTp}`,
       "",
-    ].join("\n");
+    ];
+    return parts.join("\n");
   });
 
   const message = ["현재 진행 중인 길동픽 목록", "", ...lines].join("\n");
-  bot.sendMessage(msg.chat.id, message);
+  bot.sendMessage(msg.chat.id, message, { parse_mode: "HTML" });
 });
 
 const NOTICE_GROUP_LINK = "https://t.me/+UJDTas0rW2s0MzY1";
@@ -640,7 +725,7 @@ bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -706,7 +791,7 @@ bot.onText(/^\/(setlevel|목표) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -807,7 +892,7 @@ bot.onText(/^\/(close|종료) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -888,7 +973,7 @@ bot.onText(/^\/(open|재개) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -963,7 +1048,7 @@ bot.onText(/^\/(delete|삭제) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -1024,7 +1109,7 @@ bot.onText(/^\/health$/, async (msg) => {
   if (!userId) {
     return;
   }
-  if (!isAdmin(userId)) {
+  if (!(await canUseDm(userId))) {
     return;
   }
 
@@ -1067,18 +1152,25 @@ bot.on("new_chat_members", async (msg) => {
 
   const chatId = String(msg.chat.id);
 
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("id")
-    .eq("default_group_chat_id", chatId)
+  const { data: groupRow, error } = await supabase
+    .from("alert_groups")
+    .select("role")
+    .eq("group_chat_id", chatId)
+    .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error("user_settings 조회 중 오류:", error);
+    console.error("alert_groups 조회 중 오류:", error);
     return;
   }
 
-  if (data) {
+  const role = groupRow?.role;
+
+  if (role === "VIP" || role === "NOTICE") {
+    return;
+  }
+
+  if (role !== "GENERAL") {
     return;
   }
 

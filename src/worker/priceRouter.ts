@@ -15,6 +15,8 @@ export type TargetRow = {
   group_chat_id: string | null;
   // 선택: '무료픽' | 'VIP픽' 저장용 (없으면 무료픽으로 간주)
   pick_type?: string | null;
+  // 매수가 범위 (예: "110000 ~ 220000")
+  buy_price_range?: string | null;
 };
 
 type AlertGroupRow = {
@@ -219,8 +221,10 @@ export async function processPriceEvent(
 
     lastMessageId = await sendTelegramViaVercel(target.group_chat_id, legacyMessage);
   } else {
-    // 2) alert_groups 에 등록된 각 그룹으로 역할에 따라 분기 발송
+    // 2) alert_groups 에 등록된 각 그룹으로 역할에 따라 분기 발송 (GENERAL은 매도가 알림 제외)
     for (const group of alertGroups) {
+      if (group.role === "GENERAL") continue;
+
       const role = group.role === "VIP" ? "VIP" : "NOTICE";
       const isVipRoom = role === "VIP";
 
