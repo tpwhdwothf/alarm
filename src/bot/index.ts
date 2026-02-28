@@ -24,8 +24,7 @@ const START_MESSAGE = [
 const COMMAND_LIST_MESSAGE = [
   "📌 사용 가능한 명령어",
   "",
-  "━━━ DM에서만 사용 ━━━",
-  "(관리자 또는 일반방 소속 회원만 DM 사용 가능)",
+  "━━━ DM에서만 사용 (관리자 전용) ━━━",
   "/start 또는 /시작 : 봇 소개",
   "/명령어 : 사용 가능한 명령어 목록 (지금 이 메시지)",
   "/add 또는 /등록 : 목표가 등록·갱신",
@@ -44,7 +43,7 @@ const COMMAND_LIST_MESSAGE = [
   "/setgroup : 이 채팅방을 알림 그룹으로 등록",
   "  - /setgroup 공지방 : 공지방 (알림 O, VIP픽 비공개, 새 멤버 인사 X)",
   "  - /setgroup VIP : VIP방 (알림 O, 모두 공개, 새 멤버 인사 X)",
-  "  - /setgroup 일반방 : 일반방 (알림 X, VIP픽 비공개, 새 멤버 인사 O)",
+  "  - /setgroup 일반방 : 일반방 (알림 X, VIP픽 비공개, 새 멤버 인사 O, DM 불가)",
   "",
   "━━━ DM·그룹 모두 사용 ━━━",
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
@@ -74,20 +73,6 @@ function isAdmin(userId: string | null): boolean {
     return true;
   }
   return ADMIN_ID_LIST.includes(userId);
-}
-
-async function canUseDm(userId: string | null): Promise<boolean> {
-  if (!userId) return false;
-  if (isAdmin(userId)) return true;
-  if (!supabase) return false;
-  const { data } = await supabase
-    .from("alert_groups")
-    .select("id")
-    .eq("created_by", userId)
-    .eq("role", "GENERAL")
-    .limit(1)
-    .maybeSingle();
-  return !!data;
 }
 
 function isPrivateChat(msg: TelegramBot.Message): boolean {
@@ -136,7 +121,7 @@ bot.onText(/^\/start$/, async (msg) => {
     return;
   }
   const userId = getUserId(msg);
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
     return;
   }
   bot.sendMessage(msg.chat.id, START_MESSAGE);
@@ -148,7 +133,7 @@ bot.onText(/^\/명령어$/, async (msg) => {
     return;
   }
   const userId = getUserId(msg);
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
     return;
   }
   bot.sendMessage(msg.chat.id, COMMAND_LIST_MESSAGE);
@@ -220,7 +205,7 @@ bot.onText(/^\/setgroup(?:\s+(.+))?$/, async (msg, match) => {
   const roleMessages: Record<string, string> = {
     VIP: "이 채팅방을 VIP방으로 설정했어요.\n매도가 알림이 전송되며, 무료픽·VIP픽 모두 공개됩니다.\n일반회원은 DM 사용이 불가합니다.",
     GENERAL:
-      "이 채팅방을 일반방으로 설정했어요.\n매도가 알림은 전송되지 않고, /목록 시 VIP픽은 비공개입니다.\n일반회원도 DM 사용이 가능합니다.",
+      "이 채팅방을 일반방으로 설정했어요.\n매도가 알림은 전송되지 않고, /목록 시 VIP픽은 비공개입니다.\n/등록·/목록 등 DM 전용 명령은 관리자만 사용할 수 있어요.",
     NOTICE:
       "이 채팅방을 공지방으로 설정했어요.\n매도가 알림이 전송되며, VIP픽은 비공개입니다.\n일반회원은 DM 사용이 불가합니다.",
   };
@@ -242,7 +227,8 @@ bot.onText(/^\/(add|등록) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -428,7 +414,8 @@ bot.onText(/^\/(edit|수정) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -518,7 +505,8 @@ bot.onText(/^\/(append|추가) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -615,91 +603,100 @@ bot.onText(/^\/(append|추가) (.+)$/, async (msg, match) => {
 });
 
 bot.onText(/^\/(list|목록)$/, async (msg) => {
-  if (!supabase) {
-    bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /list 를 처리할 수 없습니다.");
-    return;
-  }
-
-  const userId = getUserId(msg);
-  if (isPrivateChat(msg) && !(await canUseDm(userId))) {
-    return;
-  }
-
-  const client = supabaseAdmin ?? supabase;
-
-  let isVipHiddenRoom = false;
-  if (isGroupChat(msg)) {
-    const { data: groupRow } = await client
-      .from("alert_groups")
-      .select("role")
-      .eq("group_chat_id", String(msg.chat.id))
-      .limit(1)
-      .maybeSingle();
-    const role = groupRow?.role;
-    isVipHiddenRoom = role === "NOTICE" || role === "GENERAL";
-  }
-
-  const { data, error } = await client
-    .from("targets")
-    .select("symbol, name, market, tps, next_level, status, pick_type, buy_price_range")
-    .eq("status", "ACTIVE")
-    .order("symbol");
-
-  if (error) {
-    console.error(error);
-    bot.sendMessage(msg.chat.id, "목록을 불러오는 중 오류가 발생했어요.");
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    bot.sendMessage(msg.chat.id, "진행 중인 길동픽이 없습니다.");
-    return;
-  }
-
-  const isDm = isPrivateChat(msg);
-  const isAdminDm = isDm && isAdmin(userId);
-
-  const lines = data.map((row: any) => {
-    const tpsArray = Array.isArray(row.tps) ? row.tps : [];
-    const tpsText = tpsArray.length ? tpsArray.join(", ") : "(없음)";
-
-    const nextIdx = row.next_level - 1;
-    const nextTp =
-      nextIdx >= 0 && nextIdx < tpsArray.length
-        ? String(tpsArray[nextIdx])
-        : "모든 목표가 도달";
-
-    const pickType = row.pick_type === "VIP픽" ? "코길동 VIP픽" : "코길동 무료픽";
-
-    if (row.pick_type === "VIP픽" && isVipHiddenRoom && !isAdminDm) {
-      return [
-        `<b>${pickType}</b>`,
-        "종목: 비공개",
-        "매수가: 비공개",
-        "목표가: 비공개",
-        "다음 목표가: 비공개",
-        "",
-      ].join("\n");
+  try {
+    if (!supabase) {
+      bot.sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /list 를 처리할 수 없습니다.");
+      return;
     }
 
-    const header = row.name ? `${row.name}(${row.symbol})` : `${row.symbol}`;
-    const buyPriceLine = row.buy_price_range
-      ? `매수가: ${row.buy_price_range}`
-      : null;
+    const userId = getUserId(msg);
+    if (isPrivateChat(msg) && !isAdmin(userId)) {
+      bot.sendMessage(msg.chat.id, "이 명령은 DM에서 관리자만 사용할 수 있어요.");
+      return;
+    }
 
-    const parts = [
-      `<b>${pickType}</b>`,
-      `종목: ${header}`,
-      ...(buyPriceLine ? [buyPriceLine] : []),
-      `목표가: ${tpsText}`,
-      `다음 목표가: ${nextTp}`,
-      "",
-    ];
-    return parts.join("\n");
-  });
+    const client = supabaseAdmin ?? supabase;
 
-  const message = ["현재 진행 중인 길동픽 목록", "", ...lines].join("\n");
-  bot.sendMessage(msg.chat.id, message, { parse_mode: "HTML" });
+    let isVipHiddenRoom = false;
+    if (isGroupChat(msg)) {
+      const { data: groupRow } = await client
+        .from("alert_groups")
+        .select("role")
+        .eq("group_chat_id", String(msg.chat.id))
+        .limit(1)
+        .maybeSingle();
+      const role = groupRow?.role;
+      isVipHiddenRoom = role === "NOTICE" || role === "GENERAL";
+    }
+
+    const { data, error } = await client
+      .from("targets")
+      .select("symbol, name, market, tps, next_level, status, pick_type, buy_price_range")
+      .eq("status", "ACTIVE")
+      .order("symbol");
+
+    if (error) {
+      console.error("[목록] Supabase 오류:", error?.message ?? error);
+      bot.sendMessage(
+        msg.chat.id,
+        "목록을 불러오는 중 오류가 발생했어요.\n(Supabase 연결·키·테이블 확인이 필요할 수 있어요. 서버 로그를 확인해 주세요.)"
+      );
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      bot.sendMessage(msg.chat.id, "진행 중인 길동픽이 없습니다.");
+      return;
+    }
+
+    const isDm = isPrivateChat(msg);
+    const isAdminDm = isDm && isAdmin(userId);
+
+    const lines = data.map((row: any) => {
+      const tpsArray = Array.isArray(row.tps) ? row.tps : [];
+      const tpsText = tpsArray.length ? tpsArray.join(", ") : "(없음)";
+
+      const nextIdx = row.next_level - 1;
+      const nextTp =
+        nextIdx >= 0 && nextIdx < tpsArray.length
+          ? String(tpsArray[nextIdx])
+          : "모든 목표가 도달";
+
+      const pickType = row.pick_type === "VIP픽" ? "코길동 VIP픽" : "코길동 무료픽";
+
+      if (row.pick_type === "VIP픽" && isVipHiddenRoom && !isAdminDm) {
+        return [
+          `<b>${pickType}</b>`,
+          "종목: 비공개",
+          "매수가: 비공개",
+          "목표가: 비공개",
+          "다음 목표가: 비공개",
+          "",
+        ].join("\n");
+      }
+
+      const header = row.name ? `${row.name}(${row.symbol})` : `${row.symbol}`;
+      const buyPriceLine = row.buy_price_range
+        ? `매수가: ${row.buy_price_range}`
+        : null;
+
+      const parts = [
+        `<b>${pickType}</b>`,
+        `종목: ${header}`,
+        ...(buyPriceLine ? [buyPriceLine] : []),
+        `목표가: ${tpsText}`,
+        `다음 목표가: ${nextTp}`,
+        "",
+      ];
+      return parts.join("\n");
+    });
+
+    const message = ["현재 진행 중인 길동픽 목록", "", ...lines].join("\n");
+    bot.sendMessage(msg.chat.id, message, { parse_mode: "HTML" });
+  } catch (err) {
+    console.error("[목록] 예외:", err);
+    bot.sendMessage(msg.chat.id, "목록을 불러오는 중 예기치 않은 오류가 발생했어요.");
+  }
 });
 
 const NOTICE_GROUP_LINK = "https://t.me/+UJDTas0rW2s0MzY1";
@@ -725,7 +722,8 @@ bot.onText(/^\/(status|상태) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -791,7 +789,8 @@ bot.onText(/^\/(setlevel|목표) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -892,7 +891,8 @@ bot.onText(/^\/(close|종료) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -973,7 +973,8 @@ bot.onText(/^\/(open|재개) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -1048,7 +1049,8 @@ bot.onText(/^\/(delete|삭제) (.+)$/, async (msg, match) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
@@ -1109,7 +1111,8 @@ bot.onText(/^\/health$/, async (msg) => {
   if (!userId) {
     return;
   }
-  if (!(await canUseDm(userId))) {
+  if (!isAdmin(userId)) {
+    bot.sendMessage(msg.chat.id, "이 명령은 관리자만 사용할 수 있어요.");
     return;
   }
 
