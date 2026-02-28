@@ -51,6 +51,9 @@ const COMMAND_LIST_MESSAGE = [
   "/list 또는 /목록 : 진행 중인 길동픽 목록 보기",
   "/공지방 : 공지방 입장 링크",
   "",
+  "━━━ 그룹·채널 권한 확인 ━━━",
+  "/권한확인 : 봇이 이 채팅방/채널에 메시지를 보낼 권한이 있는지 확인",
+  "",
   "예) /등록 코길동 무료픽 LG에너지솔루션 373220 110000~220000 435000 454000 490000 525000 600000 630000",
   "예) /등록 코길동 무료픽 현대차 005380 660000 675000  (매수가 생략 가능)",
   "예) /setgroup 공지방  (공지방에서 실행)",
@@ -105,6 +108,7 @@ interface TgMessage {
 interface TgUpdate {
   update_id: number;
   message?: TgMessage;
+  channel_post?: TgMessage;
 }
 
 function getUserId(msg: TgMessage): string | null {
@@ -169,6 +173,54 @@ async function sendMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** 채널/그룹 전송 실패 시 DM으로 대체 전송 (채널 권한 부족 시 사용자에게 안내) */
+async function sendMessageWithDmFallback(
+  msg: TgMessage,
+  text: string,
+  parseMode?: "HTML"
+): Promise<void> {
+  const result = await trySendMessage(msg.chat.id, text, parseMode);
+  if (result.ok) return;
+  if (msg.from?.id && msg.chat.id !== msg.from.id) {
+    const fallback = [
+      text,
+      "",
+      "⚠️ 위 내용을 채널에 올리지 못했습니다.",
+      result.error ? `(오류: ${result.error})` : null,
+      "봇을 채널 관리자로 추가하고 'Post messages' 권한을 부여해주세요.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await sendMessage(msg.from.id, fallback);
+  } else {
+    console.error("[setchannel] 채널 전송 실패, DM 불가:", result.error);
+  }
+}
+
+/** API 응답을 확인해 성공/실패를 반환 (권한 확인용) */
+async function trySendMessage(
+  chatId: number,
+  text: string,
+  parseMode?: "HTML"
+): Promise<{ ok: boolean; error?: string }> {
+  if (!TELEGRAM_BOT_TOKEN) return { ok: false, error: "봇 토큰 없음" };
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+  };
+  if (parseMode) body.parse_mode = parseMode;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as { ok: boolean; description?: string };
+  if (data.ok) return { ok: true };
+  return { ok: false, error: data.description ?? "알 수 없는 오류" };
 }
 
 async function handleStart(msg: TgMessage): Promise<void> {
@@ -244,24 +296,25 @@ async function handleSetGroup(msg: TgMessage): Promise<void> {
 }
 
 async function handleSetChannel(msg: TgMessage): Promise<void> {
+  const reply = (text: string) => sendMessageWithDmFallback(msg, text);
+
   if (!supabase) {
-    await sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /setchannel 을 저장할 수 없습니다.");
+    await reply("Supabase 설정이 되어 있지 않아 /setchannel 을 저장할 수 없습니다.");
     return;
   }
   if (!isChannelChat(msg)) {
-    await sendMessage(
-      msg.chat.id,
+    await reply(
       "이 명령은 채널에서만 사용할 수 있습니다.\n\n1. 봇을 채널 관리자로 추가 (Post messages 권한)\n2. 채널에 /setchannel 입력"
     );
     return;
   }
   const userId = getUserId(msg);
   if (!userId) {
-    await sendMessage(msg.chat.id, "채널에 자신의 계정으로(익명이 아닌) 메시지를 보내야 합니다.");
+    await reply("채널에 자신의 계정으로(익명이 아닌) 메시지를 보내야 합니다.");
     return;
   }
   if (!isAdmin(userId)) {
-    await sendMessage(msg.chat.id, "채널 등록은 관리자만 할 수 있어요.");
+    await reply("채널 등록은 관리자만 할 수 있어요.");
     return;
   }
 
@@ -284,13 +337,13 @@ async function handleSetChannel(msg: TgMessage): Promise<void> {
       );
     if (error) {
       console.error("alert_groups 채널 등록 오류:", error);
-      await sendMessage(msg.chat.id, "채널 등록 중 오류가 발생했어요.");
+      await reply("채널 등록 중 오류가 발생했어요.");
       return;
     }
-    await sendMessage(msg.chat.id, channelRoleMessages[role]);
+    await reply(channelRoleMessages[role]);
   } catch (e) {
     console.error("handleSetChannel 예외:", e);
-    await sendMessage(msg.chat.id, "채널 등록 중 오류가 발생했어요.");
+    await reply("채널 등록 중 오류가 발생했어요.");
   }
 }
 
@@ -811,6 +864,33 @@ async function handleHealth(msg: TgMessage): Promise<void> {
   await sendMessage(msg.chat.id, lines.join("\n"));
 }
 
+async function handleCheckPerms(msg: TgMessage): Promise<void> {
+  const chatType = msg.chat.type;
+  const isChannel = chatType === "channel";
+  const placeName = isChannel ? "채널" : "채팅방";
+
+  const result = await trySendMessage(msg.chat.id, `✅ 이 ${placeName}에 메시지를 보낼 권한이 있습니다.`);
+  if (result.ok) return;
+
+  const errorMsg = [
+    `❌ 이 ${placeName}에 메시지를 보낼 권한이 없습니다.`,
+    "",
+    "봇을 관리자로 추가하고 'Post messages' 권한을 부여해주세요.",
+    result.error ? `(오류: ${result.error})` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  if (msg.from?.id && msg.chat.id !== msg.from.id) {
+    const dmResult = await trySendMessage(msg.from.id, errorMsg);
+    if (!dmResult.ok) {
+      console.error("[checkperms] DM 전송 실패:", dmResult.error);
+    }
+  } else {
+    console.error("[checkperms] 권한 없음, DM 전달 불가:", result.error);
+  }
+}
+
 async function handleNewChatMembers(msg: TgMessage): Promise<void> {
   if (!isGroupChat(msg) || !msg.new_chat_members?.length || !supabase) return;
 
@@ -863,7 +943,7 @@ async function handleNewChatMembers(msg: TgMessage): Promise<void> {
 }
 
 async function processUpdate(update: TgUpdate): Promise<void> {
-  const msg = update.message;
+  const msg = update.message ?? update.channel_post;
   if (!msg) return;
 
   if (msg.new_chat_members?.length) {
@@ -931,6 +1011,10 @@ async function processUpdate(update: TgUpdate): Promise<void> {
   }
   if (/^\/health$/.test(text)) {
     await handleHealth(msg);
+    return;
+  }
+  if (/^\/(권한확인|checkperms)$/.test(text)) {
+    await handleCheckPerms(msg);
     return;
   }
 }
