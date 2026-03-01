@@ -233,10 +233,8 @@ export async function processPriceEvent(
 
     lastMessageId = await sendTelegramViaVercel(target.group_chat_id, legacyMessage);
   } else {
-    // 2) alert_groups 에 등록된 각 그룹으로 역할에 따라 분기 발송 (GENERAL은 매도가 알림 제외)
+    // 2) alert_groups 에 등록된 각 그룹으로 역할에 따라 분기 발송
     for (const group of alertGroups) {
-      if (group.role === "GENERAL") continue;
-
       const role = group.role === "VIP" ? "VIP" : "NOTICE";
       const isVipRoom = role === "VIP";
 
