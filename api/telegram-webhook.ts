@@ -979,7 +979,7 @@ async function handleQuestion(msg: TgMessage): Promise<void> {
 
   await sendMessage(
     msg.chat.id,
-    `질문 ${nextIndex}번으로 등록했습니다.\n관리자가 /답변 명령으로 순서대로 확인할 수 있어요.`
+    `질문 ${nextIndex}번으로 등록했습니다.\n코길동이 확인 후 답변드릴게요!`
   );
 }
 
@@ -1188,7 +1188,8 @@ async function handleNewChatMembers(msg: TgMessage): Promise<void> {
       "👉 /목록 을 입력해 주세요!",
       "",
       "코길동에게 질문 하고 싶다면",
-      "👉 /질문을 입력하고 질문 내용을 입력해주세요! (ex: /질문 코길동 너 뭐하묘?)",
+      "👉 /질문을 입력하고 질문 내용을 입력해주세요! ",
+      "(예시: /질문 코길동 너 뭐하묘?)",
       "질문이 누락 되지 않고 코길동에게 전달됩니다.",
       "",
       "코길동 픽을 더 빠르게 확인하고 싶다면",
