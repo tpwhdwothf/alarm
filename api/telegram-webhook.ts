@@ -115,6 +115,18 @@ function getUserId(msg: TgMessage): string | null {
   return msg.from ? String(msg.from.id) : null;
 }
 
+function getUserDisplayName(user: TgUser): string {
+  const parts = [user.first_name, user.last_name].filter(Boolean);
+  return parts.join(" ") || user.username || String(user.id);
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function isAdmin(userId: string | null): boolean {
   if (!userId) return false;
   if (ADMIN_ID_LIST.length === 0) return true;
@@ -885,6 +897,215 @@ async function handleHealth(msg: TgMessage): Promise<void> {
   await sendMessage(msg.chat.id, lines.join("\n"));
 }
 
+async function handleQuestion(msg: TgMessage): Promise<void> {
+  if (!supabase) {
+    await sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /질문 을 저장할 수 없습니다.");
+    return;
+  }
+  if (!isGroupChat(msg)) {
+    await sendMessage(msg.chat.id, "이 명령은 그룹 채팅에서만 사용할 수 있습니다.");
+    return;
+  }
+  if (!msg.from) return;
+
+  const text = (msg.text || "").trim();
+  const match = text.match(/^\/질문\s+(.+)$/);
+  if (!match) {
+    await sendMessage(msg.chat.id, "사용법: /질문 내용\n예) /질문 오늘 장 코길동 픽 관리 어떻게 하나요?");
+    return;
+  }
+  const questionText = match[1].trim();
+  if (!questionText) {
+    await sendMessage(msg.chat.id, "질문 내용을 함께 입력해 주세요.\n예) /질문 오늘 장 코길동 픽 관리 어떻게 하나요?");
+    return;
+  }
+
+  const chatId = String(msg.chat.id);
+
+  // 기존 질문 목록 조회 (해당 채팅방)
+  const { data: existing, error: existingError } = await supabase
+    .from("questions")
+    .select("question_index, deleted")
+    .eq("chat_id", chatId)
+    .order("question_index", { ascending: true });
+
+  if (existingError) {
+    console.error("[questions] 조회 오류:", existingError);
+    await sendMessage(msg.chat.id, "질문을 저장하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  let nextIndex = 1;
+
+  if (existing && existing.length > 0) {
+    const allDeleted = existing.every((row) => row.deleted === true);
+    if (allDeleted) {
+      // 모두 삭제된 상태면 번호를 리셋하기 위해 기존 행 제거
+      const { error: clearError } = await supabase
+        .from("questions")
+        .delete()
+        .eq("chat_id", chatId);
+      if (clearError) {
+        console.error("[questions] 초기화 오류:", clearError);
+      }
+      nextIndex = 1;
+    } else {
+      const last = existing[existing.length - 1];
+      nextIndex = (last.question_index as number) + 1;
+    }
+  }
+
+  const user = msg.from;
+  const displayName = getUserDisplayName(user);
+
+  const { error: insertError } = await supabase.from("questions").insert({
+    chat_id: chatId,
+    question_index: nextIndex,
+    user_id: String(user.id),
+    username: user.username ?? null,
+    full_name: displayName,
+    text: questionText,
+  });
+
+  if (insertError) {
+    console.error("[questions] 저장 오류:", insertError);
+    await sendMessage(msg.chat.id, "질문을 저장하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  await sendMessage(
+    msg.chat.id,
+    `질문 ${nextIndex}번으로 등록했습니다.\n관리자가 /답변 명령으로 순서대로 확인할 수 있어요.`
+  );
+}
+
+async function handleQuestionList(msg: TgMessage): Promise<void> {
+  if (!supabase) {
+    await sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /답변 을 사용할 수 없습니다.");
+    return;
+  }
+  const userId = getUserId(msg);
+  if (!isAdmin(userId)) return;
+
+  const chatId = String(msg.chat.id);
+
+  const { data, error } = await supabase
+    .from("questions")
+    .select("question_index, user_id, username, full_name, text, deleted")
+    .eq("chat_id", chatId)
+    .order("question_index", { ascending: true });
+
+  if (error) {
+    console.error("[questions] 목록 조회 오류:", error);
+    await sendMessage(msg.chat.id, "질문 목록을 불러오는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (!data || data.length === 0 || data.every((row) => row.deleted === true)) {
+    await sendMessage(msg.chat.id, "등록된 질문이 없습니다.");
+    return;
+  }
+
+  const lines: string[] = ["📋 누적된 질문 목록", ""];
+
+  for (const row of data) {
+    const idx = row.question_index as number;
+    if (row.deleted) {
+      lines.push(`${idx}. (삭제됨)`);
+      continue;
+    }
+    const uid = row.user_id as string;
+    const username = (row.username as string | null) ?? "";
+    const fullName = (row.full_name as string | null) ?? "";
+    const questionText = escapeHtml(String(row.text ?? ""));
+
+    const mentionName = escapeHtml(fullName || username || uid);
+    const mention = `<a href="tg://user?id=${uid}">${mentionName}</a>`;
+    const usernameLabel = username ? ` (@${escapeHtml(username)})` : "";
+
+    lines.push(
+      `${idx}. ${mention}${usernameLabel}\n   - ${questionText}`
+    );
+  }
+
+  await sendMessage(msg.chat.id, lines.join("\n"), "HTML");
+}
+
+async function handleQuestionDelete(msg: TgMessage): Promise<void> {
+  if (!supabase) {
+    await sendMessage(msg.chat.id, "Supabase 설정이 되어 있지 않아 /질문삭제 를 사용할 수 없습니다.");
+    return;
+  }
+  const userId = getUserId(msg);
+  if (!isAdmin(userId)) return;
+
+  const text = (msg.text || "").trim();
+  const match = text.match(/^\/질문삭제\s+(\d+)$/);
+  if (!match) {
+    await sendMessage(msg.chat.id, "사용법: /질문삭제 번호\n예) /질문삭제 1");
+    return;
+  }
+  const index = Number(match[1]);
+  if (!Number.isInteger(index) || index <= 0) {
+    await sendMessage(msg.chat.id, "질문 번호는 1 이상의 정수여야 합니다.");
+    return;
+  }
+
+  const chatId = String(msg.chat.id);
+
+  const { data, error } = await supabase
+    .from("questions")
+    .select("id, deleted")
+    .eq("chat_id", chatId)
+    .eq("question_index", index)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[questions] 단일 조회 오류:", error);
+    await sendMessage(msg.chat.id, "질문을 삭제하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  if (!data) {
+    await sendMessage(msg.chat.id, `질문 ${index}번을 찾을 수 없습니다.`);
+    return;
+  }
+
+  if (data.deleted) {
+    await sendMessage(msg.chat.id, `질문 ${index}번은 이미 삭제되었습니다.`);
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from("questions")
+    .update({ deleted: true })
+    .eq("id", data.id);
+
+  if (updateError) {
+    console.error("[questions] 삭제 플래그 업데이트 오류:", updateError);
+    await sendMessage(msg.chat.id, "질문을 삭제하는 중 오류가 발생했어요.");
+    return;
+  }
+
+  // 남은 질문이 모두 deleted면 테이블 정리해서 다음 질문을 1부터 시작
+  const { data: remain, error: remainError } = await supabase
+    .from("questions")
+    .select("deleted")
+    .eq("chat_id", chatId);
+
+  if (!remainError && remain && remain.length > 0 && remain.every((row) => row.deleted === true)) {
+    const { error: clearError } = await supabase
+      .from("questions")
+      .delete()
+      .eq("chat_id", chatId);
+    if (clearError) {
+      console.error("[questions] 전부 삭제 후 정리 오류:", clearError);
+    }
+  }
+
+  await sendMessage(msg.chat.id, `질문 ${index}번을 삭제했습니다.`);
+}
+
 async function handleCheckPerms(msg: TgMessage): Promise<void> {
   if (isGroupChat(msg)) {
     if (!isAdmin(getUserId(msg))) return;
@@ -1039,6 +1260,18 @@ async function processUpdate(update: TgUpdate): Promise<void> {
   }
   if (/^\/health$/.test(text)) {
     await handleHealth(msg);
+    return;
+  }
+  if (/^\/질문(?:\s+.+)?$/.test(text)) {
+    await handleQuestion(msg);
+    return;
+  }
+  if (/^\/답변$/.test(text)) {
+    await handleQuestionList(msg);
+    return;
+  }
+  if (/^\/질문삭제\s+\d+$/.test(text)) {
+    await handleQuestionDelete(msg);
     return;
   }
   if (/^\/(권한확인|checkperms)$/.test(text)) {

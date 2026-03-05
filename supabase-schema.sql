@@ -37,10 +37,25 @@ create table if not exists public.alert_logs (
   message_id text
 );
 
+-- Q&A용 질문 큐
+create table if not exists public.questions (
+  id uuid primary key default gen_random_uuid(),
+  chat_id text not null,
+  question_index integer not null,
+  user_id text not null,
+  username text,
+  full_name text,
+  text text not null,
+  deleted boolean not null default false,
+  created_at timestamptz not null default now(),
+  constraint uq_questions_chat_index unique (chat_id, question_index)
+);
+
 -- 봇이 anon 키로 저장·조회할 수 있도록 RLS 정책 추가 (정책이 없으면 저장 시 "오류" 발생)
 alter table public.user_settings enable row level security;
 alter table public.targets enable row level security;
 alter table public.alert_logs enable row level security;
+alter table public.questions enable row level security;
 
 drop policy if exists "anon_all_user_settings" on public.user_settings;
 create policy "anon_all_user_settings"
@@ -53,4 +68,8 @@ create policy "anon_all_targets"
 drop policy if exists "anon_all_alert_logs" on public.alert_logs;
 create policy "anon_all_alert_logs"
   on public.alert_logs for all to anon using (true) with check (true);
+
+drop policy if exists "anon_all_questions" on public.questions;
+create policy "anon_all_questions"
+  on public.questions for all to anon using (true) with check (true);
 
